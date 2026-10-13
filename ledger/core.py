@@ -192,6 +192,8 @@ class Ledger:
             # zero is allowed: a card's account-verification check holds nothing
             if ev.amount < 0:
                 return "amount must not be negative"
+            if not ev.auth_id:
+                return "authorization ID missing"
             if self.auth_state(ev.auth_id) is not None:
                 return f"{ev.auth_id} already exists"
             return None

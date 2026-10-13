@@ -250,6 +250,21 @@ class EdgeCases(unittest.TestCase):
         self.assertTrue(errors(ledger, "D0") and errors(ledger, "D1"))
         self.assertEqual((ledger.auth_state("Auth-A").state, ledger.auth_state("Auth-B").state), (SETTLED, DECLINED))
 
+    def test_back_valued_note_is_for_money_events_only(self):
+        ledger = replay_until("E2")
+        ledger.apply(Event("C3", 3, "CREDIT", A1, 100, value_day=3))                  # now on Day 3
+        ledger.apply(Event("LA", 2, "AUTHORIZATION", A1, 100, value_day=2, auth_id="Auth-L"))
+        ledger.apply(Event("LD", 2, "DEBIT", A1, 100, value_day=2))
+        levels = lambda src: sorted(n.level for n in ledger.notices if n.source == src)
+        self.assertEqual(levels("LA"), ["WARNING"])                 # late, but a hold has no value date
+        self.assertEqual(levels("LD"), ["INFO", "WARNING"])         # late and back-valued
+
+    def test_authorization_without_an_id_is_refused(self):
+        ledger = replay_until("E2")
+        ledger.apply(Event("NA", 1, "AUTHORIZATION", A1, 100))
+        self.assertTrue(errors(ledger, "NA"))
+        self.assertIsNone(ledger.auth_state(None))
+
     def test_a_content_refusal_still_advances_the_day(self):
         ledger = replay_until("E2")                                  # still Day 1
         ledger.apply(Event("BAD", 4, "TRANSFER", A1, 100, value_day=4))

@@ -99,7 +99,7 @@ Each entry gives the ambiguity, how I resolved it, and what would change under t
     **Resolved:** each of the following is refused with an ERROR before its ID is consumed, so a corrected retry can reuse the ID:
     - a credit, debit, settlement or reversal with a value date before Day 1 or after the processing day (future-dated entries are not supported). Authorizations carry no value date on the ledger (#6), so this rule does not apply to them;
     - a booked day outside Day 1..6;
-    - an authorization ID that already exists;
+    - an authorization ID that is missing or already exists;
     - an unknown event type;
     - a non-positive amount on a credit, debit or settlement;
     - a negative authorization. Zero is allowed: it is a card's account-verification check and holds nothing.
