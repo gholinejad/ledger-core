@@ -24,10 +24,16 @@ jobs:
       - name: Committed figures match the code
         run: |
           python tools/make_figures.py
-          git diff --exit-code -- docs/img
-      - name: The deliberate failure still fails
+          git status --porcelain -- docs/img
+          test -z "$(git status --porcelain -- docs/img)"   # catches changed and never-committed figures
+      - name: The deliberate failure still fails, for its documented reason
         run: |
-          if python -m unittest tests.test_known_failure; then
-            echo "tests/test_known_failure.py passed, but it must fail on purpose (see the test and REJECTED.md)"
-            exit 1
+          set +e
+          python -m unittest tests.test_known_failure > known.log 2>&1
+          status=$?
+          set -e
+          cat known.log
+          if [ "$status" -eq 0 ]; then
+            echo "tests/test_known_failure.py passed, but it must fail on purpose (see the test and REJECTED.md)"; exit 1
           fi
+          grep -q "AssertionError: 0 != 10000" known.log || { echo "it failed, but not for its documented reason"; exit 1; }

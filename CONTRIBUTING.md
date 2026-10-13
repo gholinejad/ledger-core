@@ -47,12 +47,12 @@ These rules apply to every change, whether a person or an agent makes it. GitHub
   2. Read the diff against §3 and §5.
   3. Post its findings as a PR review comment.
   4. Set the `agent-review` commit status on the head SHA to `success` (no blocking findings) or `failure`.
-- **The author never sets `agent-review`.** GitHub does not allow an account to approve its own PR, so the status check is how the agent's approval is enforced.
+- **The author never sets `agent-review`.** GitHub does not let an account approve its own PR, so the agent's approval is recorded as a required status check. GitHub enforces that a successful `agent-review` status exists on the head commit. It cannot enforce who set it, because the reviewer posts with the same account, so that part is a rule of this repository. The `tests` check, by contrast, is pinned to GitHub Actions, so it cannot be set by hand.
 - A push after the review produces a new head SHA, which carries no `agent-review` status, so the PR needs a new review. To disagree with a finding, reply in the PR and request a new review. Never override the reviewer.
 
 ## 5. Ledger invariants no PR may break
 
-- Money is integer minor units. Rounding happens in exactly one place: `apply_rate`.
+- Money is integer minor units. A rate is applied, and rounded, in exactly one place: `apply_rate`. `split_evenly` divides exactly and gives the remainder to the last part.
 - Append-only:
   - No entry, accrual, authorization transition or notice is ever changed or removed.
   - A correction is a new compensating record.

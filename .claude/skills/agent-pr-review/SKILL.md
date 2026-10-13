@@ -35,7 +35,7 @@ Never echo `$GH_TOK`. Never use any other GitHub credential. If this one is miss
    - `python3 -m unittest tests.test_ledger -v` must pass.
    - `python3 -m unittest tests.test_known_failure` must fail, and for its documented reason.
    - `python3 replay.py` must run. If its output changed, compare with `NUMBERS.md`.
-4. **Review the diff** (`git -C /tmp/review-<N> diff origin/main...HEAD`) against:
+4. **Review the diff**, after `git -C <repo> fetch origin main` so the base is current (`git -C /tmp/review-<N> diff origin/main...HEAD`), against:
    - CONTRIBUTING §3, the definition of done: tests for behaviour changes, docs still true, WORKLOG append-only (no earlier line edited), PDF regenerated if the HTML changed.
    - §5, the ledger invariants.
    - correctness: probe edge cases with throwaway snippets;
