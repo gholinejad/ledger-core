@@ -239,9 +239,10 @@ class EdgeCases(unittest.TestCase):
 
     def test_parts_cannot_exceed_the_amount(self):
         ledger = replay_until("E2")
+        ledger.apply(Event("P3", 1, "CREDIT", A1, 2, value_day=1, parts=3))          # boundary: one part too many
         ledger.apply(Event("P5", 1, "CREDIT", A1, 2, value_day=1, parts=5))          # 0.02 in five parts
         ledger.apply(Event("PH", 1, "CREDIT", A1, 100, value_day=1, parts=2 ** 62))  # would exhaust memory
-        self.assertTrue(errors(ledger, "P5") and errors(ledger, "PH"))
+        self.assertTrue(errors(ledger, "P3") and errors(ledger, "P5") and errors(ledger, "PH"))
         ledger.apply(Event("P5", 1, "CREDIT", A1, 5, value_day=1, parts=5))          # corrected: 0.01 each
         self.assertEqual([e.amount for e in kinds(ledger, "CREDIT")][-5:], [1, 1, 1, 1, 1])
 
@@ -260,18 +261,23 @@ class EdgeCases(unittest.TestCase):
         levels = lambda src: sorted(n.level for n in ledger.notices if n.source == src)
         ledger.apply(Event("BC", 3, "CREDIT", A1, 100, value_day=1))                  # on time, back-valued
         ledger.apply(Event("TC", 3, "CREDIT", A1, 100, value_day=3))                  # on time, today
+        ledger.apply(Event("BS", 3, "SETTLEMENT", A1, 100, value_day=1, auth_id="Auth-Q"))
+        ledger.apply(Event("BR", 3, "REVERSAL", A1, value_day=1, target="BC"))
         self.assertEqual(levels("LA"), ["WARNING"])                 # late, but a hold has no value date
         self.assertEqual(levels("LD"), ["INFO", "WARNING"])         # late and back-valued
         self.assertEqual((levels("BC"), levels("TC")), (["INFO"], []))
+        self.assertIn("INFO", levels("BS"))
+        self.assertIn("INFO", levels("BR"))
 
     def test_authorization_without_an_id_is_refused(self):
         ledger = replay_until("E2")
         ledger.apply(Event("NA", 1, "AUTHORIZATION", A1, 100))
-        ledger.apply(Event("NE", 1, "AUTHORIZATION", A1, 100, auth_id=""))
+        ledger.apply(Event("NE", 3, "AUTHORIZATION", A1, 100, auth_id=""))
+        self.assertEqual(ledger.day, 3)                              # a content refusal still advances the day
         self.assertTrue(errors(ledger, "NA") and errors(ledger, "NE"))
         self.assertIsNone(ledger.auth_state(None))
         self.assertIsNone(ledger.auth_state(""))
-        ledger.apply(Event("NA", 1, "AUTHORIZATION", A1, 100, auth_id="Auth-N"))   # corrected retry, same id
+        ledger.apply(Event("NA", 3, "AUTHORIZATION", A1, 100, auth_id="Auth-N"))   # corrected retry, same id
         self.assertEqual(ledger.auth_state("Auth-N").state, APPROVED)
 
     def test_a_content_refusal_still_advances_the_day(self):
