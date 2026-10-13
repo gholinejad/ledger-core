@@ -201,7 +201,7 @@ class Ledger:
         if ev.value_day is None:
             return "value date missing"
         if not FIRST_DAY <= ev.value_day <= self.day:
-            return f"value Day {ev.value_day} is outside Day {FIRST_DAY}..{self.day} (future value dates are not supported)"
+            return f"value Day {ev.value_day} is outside Day {FIRST_DAY}..{self.day} (value dates before Day 1 or in the future are not supported)"
         if ev.type == "REVERSAL":
             return self._reversal_problem(ev)
         return None

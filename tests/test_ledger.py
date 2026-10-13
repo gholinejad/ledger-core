@@ -187,11 +187,12 @@ class EdgeCases(unittest.TestCase):
     def test_invalid_events_are_errors_and_keep_their_id(self):
         ledger = replay_until("E2")
         for bad in (Event("X", 1, "DEBIT", A1, 100, value_day=3),       # future value date
+                    Event("X", 1, "DEBIT", A1, 100, value_day=0),       # before the window
                     Event("X", 1, "TRANSFER", A1, 100, value_day=1),    # unknown type
                     Event("X", 1, "DEBIT", A1, -100, value_day=1),      # negative amount
                     Event("X", 1, "REVERSAL", A1, target="E2")):        # no value date
             ledger.apply(bad)
-        self.assertEqual(len(errors(ledger, "X")), 4)
+        self.assertEqual(len(errors(ledger, "X")), 5)
         ledger.apply(Event("X", 1, "DEBIT", A1, 100, value_day=1))     # the corrected retry
         self.assertEqual(ledger.balance(A1, 1), 24900)
 
@@ -224,7 +225,9 @@ class EdgeCases(unittest.TestCase):
         ledger.apply(Event("P0", 1, "CREDIT", A1, 100, value_day=1, parts=0))
         ledger.apply(Event("PN", 1, "CREDIT", A1, 100, value_day=1, parts=-1))
         ledger.apply(Event("AV", 1, "AUTHORIZATION", A1, 0, auth_id="Auth-V"))  # account verification
-        self.assertEqual([bool(errors(ledger, x)) for x in ("Z0", "P0", "PN", "AV")], [True, True, True, False])
+        ledger.apply(Event("AN", 1, "AUTHORIZATION", A1, -50000, auth_id="Auth-N"))  # would raise available
+        self.assertEqual([bool(errors(ledger, x)) for x in ("Z0", "P0", "PN", "AV", "AN")], [True, True, True, False, True])
+        self.assertIsNone(ledger.auth_state("Auth-N"))
         self.assertEqual(ledger.balance(A1, 1), 25000)
         self.assertEqual(ledger.auth_state("Auth-V").state, APPROVED)
 

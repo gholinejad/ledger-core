@@ -49,9 +49,9 @@ Each entry gives the ambiguity, how I resolved it, and what would change under t
     **Resolved:** after. The INTEREST credit is dated Day 6, so it belongs in the printed Day 6 closing balance: 285.79, not 285.00.
     **But the Day 6 fee test and accrual read the balance before capitalisation.** Capitalisation is the last act of the window. If the fee test counted it, a capitalised credit could cancel the Day 6 overdraft that decides the Day 6 accrual, which is part of that same credit. That is circular, and the restatement would stop being idempotent. A second run after capitalisation would change what the first run posted in two ways:
     - It would reverse a Day 6 fee once interest brings Day 6 to zero or above.
-    - On any positive account it would accrue Day 6 interest on the capitalised interest itself, so the accruals would no longer sum to the capitalised credit.
+    - It would accrue Day 6 interest on the capitalised interest itself. Whenever that changes the rounded Day 6 accrual, the accruals would no longer sum to the capitalised credit. For AED 10,000.00 the Day 6 accrual would go from 4.00 to 4.01.
 
-    Both readings give 285.79 for this stream. The tests are `test_restatement_is_idempotent_after_capitalisation` and `test_accrual_restatement_ignores_the_capitalised_credit`.
+    For this stream both readings round the same: 285.00 and 285.79 both give 0.11, and ACC-002 gives 0.004 either way. Both print 285.79. The tests are `test_restatement_is_idempotent_after_capitalisation` and `test_accrual_restatement_ignores_the_capitalised_credit`.
 
 ## Authorizations and settlements
 
@@ -97,7 +97,7 @@ Each entry gives the ambiguity, how I resolved it, and what would change under t
 
 24. **Invalid events and a closed window.** The brief's stream has none of these, but a ledger must still decide what happens to them.
     **Resolved:** each of the following is refused with an ERROR before its ID is consumed, so a corrected retry can reuse the ID:
-    - a future value date;
+    - a value date before Day 1 or after the current day (future-dated entries are not supported);
     - an unknown event type;
     - a non-positive amount on a credit, debit or settlement;
     - a negative authorization. Zero is allowed: it is a card's account-verification check and holds nothing.
@@ -107,3 +107,4 @@ Each entry gives the ambiguity, how I resolved it, and what would change under t
 
     For well-typed events nothing raises out of `apply()`. A field of the wrong Python type, such as `value_day="1"`, still raises a TypeError, because type checking belongs to the parser that would build the events.
     A refused event still advances the business day, because its arrival is a fact about the stream even when its content is not.
+    An event refused because the window has closed is still kept as a notice in `ledger.notices`. No daily report prints it, because the last report was Day 6's.
