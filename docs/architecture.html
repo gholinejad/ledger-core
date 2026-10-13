@@ -119,6 +119,7 @@
 <tr><td>A flat 0.04 % per day with per-day rounding</td><td>Matches the rule as written.</td><td>No day-count convention or tiers. Rounding drift of up to ±0.005 per day (0.79 paid against an exact 0.802).</td></tr>
 <tr><td>Fee in AED only, no FX</td><td>The brief prices only an AED fee.</td><td>A non-AED account can't be charged. The close records an ERROR notice rather than guessing a rate.</td></tr>
 <tr><td>Debits always post; no overdraft limit</td><td>The brief tests fees, not limits.</td><td>A customer can be overdrawn without bound. Production needs a limit, and a decline path for debits.</td></tr>
+<tr><td>Reversals are full only, and a reversal can't be reversed</td><td>The stream reverses one whole debit once.</td><td>A partial refund or a corrected reversal can't be expressed. It needs partial reversals with a running reversed amount, and a rule for re-reversal.</td></tr>
 <tr><td>No future-dated entries</td><td>The stream has none.</td><td>Scheduled payments can't be booked ahead. An entry whose value date is after the day it is processed is refused with an ERROR, not posted.</td></tr>
 <tr><td>Days without a calendar</td><td>The window is abstract.</td><td>Weekends, holidays and cut-off times change value dates and fee days.</td></tr>
 <tr><td>No operator identity, reason codes or approvals on entries</td><td>No users in scope.</td><td>No audit of who back-valued what, and no maker-checker (§2).</td></tr>

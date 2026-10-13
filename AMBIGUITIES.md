@@ -13,7 +13,15 @@ Each entry gives the ambiguity, how I resolved it, and what would change under t
 
 3. **When a fee is assessed for an earlier day that has just gone negative.** E7 is booked on Day 5 but makes Day 2 negative.
    **Resolved:** fees and accruals are worked out only at the end-of-day close. The fee is posted during the Day 5 close and dated Day 2 ("booked with value_date equal to the day assessed").
-   **Other reading:** assess the fee the moment the earlier-dated entry posts. Auth-B would still be declined either way.
+   **Other reading 1:** assess the fee the moment the earlier-dated entry posts. Auth-B would still be declined either way.
+   **Other reading 2:** a day that has already closed is never re-tested, and each close tests and accrues only its own day. Under that reading:
+   - E7 causes one fee, dated Day 5.
+   - Day 5 closes at −360.00.
+   - Nothing is refunded after E9.
+   - Day 6 closes at 260.67, with 0.67 interest.
+
+   I rejected it for three reasons. It leaves Days 2 and 4 negative on the ledger with no fee. It keeps a Day 5 fee after E9 has made Day 5 positive. And it pays interest computed on balances the ledger no longer shows. I computed these figures by running the core with re-testing switched off.
+   **Other reading 3:** "value_date equal to the day assessed" means the day the close runs, so all three fees would be dated Day 5. That puts three fees on one day, which breaks "once per day per account".
 
 4. **Which balance the fee test reads.**
    **Resolved:** all entries dated on or before that day, including fees for earlier days, but excluding that day's own fee. Without that exclusion, a fee could make the balance negative and so justify itself on every re-test, and it could never be reversed. Criterion 1's wording, "before any fee is assessed", supports this reading.
