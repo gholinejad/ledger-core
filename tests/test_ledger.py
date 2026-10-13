@@ -92,6 +92,12 @@ def ledger_entries(ledger, account, kind):
 
 
 class Invariants(unittest.TestCase):
+    def test_headline_figures(self):
+        ledger = run()
+        self.assertEqual(ledger.reports[4]["accounts"][A1]["closing"], -41000)   # Day 5 close
+        self.assertEqual(replay_until("E8").available(A1), -33500)            # Auth-B saw this
+        self.assertIn("-425.00 AED", ledger.auth_state("Auth-B").reason)      # available after its hold
+
     def test_final_closing_balances(self):
         ledger = run()
         self.assertEqual(ledger.reports[-1]["accounts"][A1]["closing"], 28579)
