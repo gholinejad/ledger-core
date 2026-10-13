@@ -1,0 +1,29 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"   # the oldest version the code supports (X | None syntax)
+      - name: Acceptance and invariant tests
+        run: python -m unittest tests.test_ledger -v
+      - name: Replay runs end to end
+        run: python replay.py
+      - name: The deliberate failure still fails
+        run: |
+          if python -m unittest tests.test_known_failure; then
+            echo "tests/test_known_failure.py passed, but it must fail on purpose (see the test and REJECTED.md)"
+            exit 1
+          fi
