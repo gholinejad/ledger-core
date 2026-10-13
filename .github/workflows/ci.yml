@@ -21,6 +21,10 @@ jobs:
         run: python -m unittest tests.test_ledger -v
       - name: Replay runs end to end
         run: python replay.py
+      - name: Committed figures match the code
+        run: |
+          python tools/make_figures.py
+          git diff --exit-code -- docs/img
       - name: The deliberate failure still fails
         run: |
           if python -m unittest tests.test_known_failure; then

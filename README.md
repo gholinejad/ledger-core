@@ -17,9 +17,9 @@ The whole design comes down to one idea: **the past is never edited.** Every end
 | **Day 5 close** | **−410.00**: E7 lands on Day 2 and three overdraft fees follow (value Days 2, 4 and 5) | 0.000: E10 has not arrived yet |
 | **Day 6 close** | **285.79**: E9 reverses E7, the three fees are refunded, 0.79 interest is capitalised | **10.008**: three instalments of 3.333 + 3.333 + 3.334, plus 0.008 interest |
 | **Authorizations** | Auth-A: APPROVED on Day 2, SETTLED at 185.00 on Day 4. Auth-B: **DECLINED** on Day 5, because available would be −425.00. Auth-Z: no authorization, so it is force-posted and raised as an exception | |
-| **Acceptance criteria** | Accepted: **1, 3, 5**. Rejected: **2, 4, 6, 7, 8** (reasons in [REJECTED.md](REJECTED.md)) | |
+| **Acceptance criteria** | Accepted: **1, 3, 5**. Rejected: **2** (one fee), **4** (reject unmatched settlement), **6** (everything returns after E9), **7** (3.334 instalments), **8** (discard the remainder). Reasons in [REJECTED.md](REJECTED.md) | |
 
-Each figure is derived by hand in [NUMBERS.md](NUMBERS.md) and asserted by a test.
+Every figure is derived by hand in [NUMBERS.md](NUMBERS.md). The tests assert the fee days, the final balances of both accounts, Auth-B's decline and every criterion.
 
 ## Run it
 
@@ -38,15 +38,16 @@ flowchart LR
   S["Event stream<br/>(stream order = clock)"] --> A["apply(event)<br/>validate · dedupe · close days in between"]
   A --> E[("entries<br/>money, signed fils")]
   A --> H[("auth_log<br/>APPROVED / DECLINED / SETTLED")]
-  A --> N[("notices<br/>ERROR / EXCEPTION / WARNING")]
+  A --> N[("notices<br/>ERROR / EXCEPTION / WARNING / INFO")]
   C["close_day()<br/>for each account, for day 1 … today:<br/>owed − already posted → post the difference"] --> E
   C --> R[("accruals<br/>interest memos")]
+  C --> N
   E --> C
   C --> P["per-day report"]
 ```
 
-1. **Money is integer minor units** (fils). Additions are exact. Decimal is used only where a rate is applied, and the result is rounded half-even straight back to an integer.
-2. **Three append-only logs**, holding frozen records:
+1. **Money is integer minor units** (fils). Every stored amount is an integer, so additions are exact. Decimal is used to parse and print amounts and to apply the interest rate; the one rounding, half-even, happens there.
+2. **Three append-only state logs**, holding frozen records, plus an append-only `notices` log for operations:
    - `entries`, the ledger;
    - `accruals`, the interest memos;
    - `auth_log`, the authorization transitions.
@@ -54,7 +55,7 @@ flowchart LR
    A state is always the latest record. A correction is a new record.
 3. **Holds are not ledger entries.** Available balance = ledger balance − holds of APPROVED authorizations.
 4. **The close re-evaluates every day of the window, oldest first.** For each day it works out the fee and accrual owed under what is known now, and posts only the difference: `FEE`, `FEE_REVERSAL` or an accrual delta. That makes back-valued entries safe and the restatement idempotent.
-5. **Stream order is processing order.** A late event (E10) is posted on the day it arrives and flagged. It is never re-sorted into a day that has already closed.
+5. **Stream order is processing order.** A late event (E10) is processed on the day it arrives, flagged, and posted with its own value date. That restates the earlier day; the order in which events are processed is never changed.
 
 ### Arrival day vs. the day an event lands on
 
@@ -117,6 +118,7 @@ ACC-002  closing ledger        0.000 BHD   available        0.000 BHD   holds 0.
 | `accrual Day k ±x` | An interest memo, or a correction to one. It is capitalised at the end of Day 6. |
 | `authorizations` | Every authorization's current state, the event that set it, and why. |
 | `errors and exceptions` | `ERROR`: refused, nothing posted. `EXCEPTION`: posted, needs ops review. `WARNING`: unusual. |
+| `note` | Informational, for example "back-valued to Day 2". |
 
 ## The documents
 

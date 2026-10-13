@@ -140,8 +140,14 @@ def _ledger_views():
         raise KeyError(event_id)
     final, day5 = run(), replay_until("E8")
     day5.close_day()
+    processed = {}                                  # the day the ledger actually recorded each event
+    for e in final.entries:
+        if e.event:
+            processed.setdefault(e.event, e.booked_day)
+    for tr in final.auth_log:
+        processed.setdefault(tr.source, tr.booked_day)
     return {
-        "STREAM": STREAM, "DAY5": day5,
+        "STREAM": STREAM, "DAY5": day5, "PROCESSED": processed,
         "PRINTED": [final.reports[d - 1]["accounts"][A1]["closing"] for d in range(1, 7)],
         "TRUTH": [final.balance(A1, d) for d in range(1, 7)],
         "VIEW5": [day5.balance(A1, d) for d in range(1, 6)],
@@ -158,13 +164,9 @@ def aed(m, sign=False):
     return ("−" if m < 0 else ("+" if sign and m > 0 else "")) + f"{abs(m) / 100:,.2f}"
 
 
-def curve_(d, c, w=2):
-    return f"<path d='{d}' stroke='{c}' stroke-width='{w}' fill='none' marker-end='url(#a{c[1:]})'/>"
-
-
 def timeline():
     v = _ledger_views()
-    STREAM = v["STREAM"]
+    STREAM, proc = v["STREAM"], v["PROCESSED"]
     W, H, L0, R0 = 840, 300, 92, 20
     X = lambda d: L0 + (d - 0.5) * (W - L0 - R0) / 6
     ay, vy = 76, 262
@@ -173,10 +175,7 @@ def timeline():
     for d in range(1, 7):
         b += t(X(d), ay - 28, f"Day {d}", 12, INK2, 700, "middle")
         b += line(X(d) - 52, vy, X(d) + 52, vy, INK2, 2) + t(X(d), vy + 20, f"Day {d}", 11, MUTED, 600, "middle")
-    proc, day, seen = {}, 1, {}
-    for ev in STREAM:                              # processing day = stream position, not booked day
-        day = max(day, ev.booked_day)
-        proc[ev.id] = day
+    seen = {}
     for ev in STREAM:
         d = proc[ev.id]
         k = seen.get(d, 0)
@@ -187,7 +186,7 @@ def timeline():
         back = ev.value_day is not None and ev.value_day < d
         c, cs = (RED, REDS) if late else (WARN, WARNS) if back else (DEV, DEVS) if hold else (ACC, ACCS)
         b += rect(cx - 25, cy - 13, 50, 26, cs, c, 1.6) + t(cx, cy + 4, ev.id, 12, c, 800, "middle")
-        tag = {"CREDIT": "credit", "DEBIT": "debit", "AUTHORIZATION": "hold", "SETTLEMENT": "settle", "REVERSAL": "reverse"}[ev.type]
+        tag = {"CREDIT": "credit", "DEBIT": "debit", "AUTHORIZATION": "auth", "SETTLEMENT": "settle", "REVERSAL": "reverse"}[ev.type]
         b += t(cx, cy + 27, tag + (" (late)" if late else ""), 9.5, c, 600, "middle")
         if hold:
             b += line(cx, cy + 33, cx, cy + 46, DEV, 1.2, "3 3") + t(cx, cy + 58, "not on ledger", 9, DEV, 600, "middle")
@@ -195,7 +194,8 @@ def timeline():
             b += line(cx, cy + 33, cx, vy - 4, c, 1.4, arrow=True)
         else:
             vx = X(ev.value_day)
-            b += curve_(f"M{cx:.1f} {cy + 33:.1f} C {cx:.1f} {vy - 40}, {vx + 30:.1f} {vy - 70}, {vx + 6:.1f} {vy - 5}", c)
+            off = 18 if ev.type == "REVERSAL" else -6      # E7 and E9 both land on Day 2: keep their heads apart
+            b += curve(f"M{cx:.1f} {cy + 33:.1f} C {cx:.1f} {vy - 40}, {vx + 30:.1f} {vy - 70}, {vx + off:.1f} {vy - 5}", c, 2)
     b += t(W - R0, 22, "E7 and E9 land three and four days back; E10 is booked Day 5 but arrives after E9", 11, RED, 600, "end")
     return svg(W, H, b, "When each event arrives and which day it lands on")
 
@@ -222,7 +222,7 @@ def three_views():
     for d, v in zip(range(1, 7), TRUTH):
         b += f"<circle cx='{X(d):.1f}' cy='{Y(v):.1f}' r='5' fill='{ACC}' stroke='#fff' stroke-width='1.5'/>"
     b += t(X(2) + 8, Y(VIEW5[1]) + 18, aed(VIEW5[1]), 12, RED, 700)
-    b += t(X(3) + 8, Y(VIEW5[2]) + 22, f"+{aed(VIEW5[2])}: positive, no fee", 12, RED, 700)
+    b += t(X(3), Y(VIEW5[2]) - 14, f"+{aed(VIEW5[2])}: positive, no fee", 12, RED, 700, "middle")
     b += t(X(4) + 8, Y(VIEW5[3]) + 18, aed(VIEW5[3]), 12, RED, 700)
     b += t(X(5), Y(VIEW5[4]) + 24, aed(VIEW5[4]), 13, RED, 800, "middle")
     b += t(X(1) + 6, Y(TRUTH[0]) - 12, aed(TRUTH[0]), 12, ACC, 700)
@@ -232,6 +232,7 @@ def three_views():
     b += line(lx, ly - 4, lx + 26, ly - 4, ACC, 3.4) + t(lx + 32, ly, "final, as known after Day 6", 12, INK, 600)
     b += line(lx + 220, ly - 4, lx + 246, ly - 4, RED, 3) + t(lx + 252, ly, "as the Day 5 close saw it (after E7)", 12, INK, 600)
     b += line(lx + 500, ly - 4, lx + 526, ly - 4, OLD, 2, "5 5") + t(lx + 532, ly, "printed each evening", 12, INK, 600)
+    b += t(W - R0, H - 2, "ACC-001, AED. The printed line equals the final one on Days 1-4.", 10.5, MUTED, 400, "end")
     b += rect(lx, ly + 10, 26, 11, REDS, rx=2) + t(lx + 32, ly + 20, "below zero: an overdraft fee is owed for that day", 11.5, RED, 600)
     return svg(W, H, b, "ACC-001 closing balance by day, three views")
 
@@ -239,7 +240,7 @@ def three_views():
 def day5_bridge():
     v = _ledger_views()
     DAY5, VIEW5, PRE5 = v["DAY5"], v["VIEW5"], v["PRE5"]
-    W, H, L0, R0, T0, B0 = 840, 330, 64, 16, 26, 74
+    W, H, L0, R0, T0, B0 = 840, 340, 64, 16, 40, 74
     lo, hi = -50000, 75000
     steps = []
     for d in range(2, 6):
@@ -256,6 +257,8 @@ def day5_bridge():
     for v in range(lo, hi + 1, 25000):
         b += line(L0, Y(v), W - R0, Y(v), RULE, 1) + t(L0 - 8, Y(v) + 4, aed(v).replace(".00", ""), 10.5, MUTED, 400, "end")
     b += line(L0, Y(0), W - R0, Y(0), INK2, 1.6)
+    b += t(W - R0, 14, "fee bars: 'test' is that day's balance before its own fee; a fee is owed when it is negative.", 10.5, MUTED, 400, "end")
+    b += t(W - R0, 28, f"Day 3 tests at +{aed(VIEW5[2])}, so it gets no fee.", 10.5, MUTED, 400, "end")
 
     def bar(i, a, z, colour, top, sub, val, strong=False):
         x = L0 + i * bw + bw * 0.14
@@ -278,8 +281,6 @@ def day5_bridge():
     assert total == VIEW5[4]
     b += bar(n - 1, 0, total, RED, "Day 5", "closing", aed(total), True)
     return svg(W, H, b, "Bridge from Day 1 closing to Day 5 closing at the Day 5 close")
-
-
 
 
 FIGURES = {"close-cost": close_cost, "backvalue-gate": backvalue_gate, "auth-lifecycle": auth_lifecycle,
