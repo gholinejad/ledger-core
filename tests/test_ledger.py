@@ -234,6 +234,8 @@ class EdgeCases(unittest.TestCase):
         ledger.apply(Event("B7", 7, "CREDIT", A1, 100, value_day=1))
         self.assertTrue(errors(ledger, "B0") and errors(ledger, "B7"))
         self.assertEqual((ledger.entries, ledger.day), ([], 1))   # nothing posted, no day closed
+        ledger.apply(Event("B0", 1, "CREDIT", A1, 100, value_day=1))   # corrected retry, same id
+        self.assertEqual(ledger.balance(A1, 1), 100)
 
     def test_parts_cannot_exceed_the_amount(self):
         ledger = replay_until("E2")
@@ -256,14 +258,21 @@ class EdgeCases(unittest.TestCase):
         ledger.apply(Event("LA", 2, "AUTHORIZATION", A1, 100, value_day=2, auth_id="Auth-L"))
         ledger.apply(Event("LD", 2, "DEBIT", A1, 100, value_day=2))
         levels = lambda src: sorted(n.level for n in ledger.notices if n.source == src)
+        ledger.apply(Event("BC", 3, "CREDIT", A1, 100, value_day=1))                  # on time, back-valued
+        ledger.apply(Event("TC", 3, "CREDIT", A1, 100, value_day=3))                  # on time, today
         self.assertEqual(levels("LA"), ["WARNING"])                 # late, but a hold has no value date
         self.assertEqual(levels("LD"), ["INFO", "WARNING"])         # late and back-valued
+        self.assertEqual((levels("BC"), levels("TC")), (["INFO"], []))
 
     def test_authorization_without_an_id_is_refused(self):
         ledger = replay_until("E2")
         ledger.apply(Event("NA", 1, "AUTHORIZATION", A1, 100))
-        self.assertTrue(errors(ledger, "NA"))
+        ledger.apply(Event("NE", 1, "AUTHORIZATION", A1, 100, auth_id=""))
+        self.assertTrue(errors(ledger, "NA") and errors(ledger, "NE"))
         self.assertIsNone(ledger.auth_state(None))
+        self.assertIsNone(ledger.auth_state(""))
+        ledger.apply(Event("NA", 1, "AUTHORIZATION", A1, 100, auth_id="Auth-N"))   # corrected retry, same id
+        self.assertEqual(ledger.auth_state("Auth-N").state, APPROVED)
 
     def test_a_content_refusal_still_advances_the_day(self):
         ledger = replay_until("E2")                                  # still Day 1
