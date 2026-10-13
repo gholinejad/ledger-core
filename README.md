@@ -6,8 +6,8 @@ An in-memory, append-only ledger that replays the six-day event stream and print
 
 ```bash
 python3 replay.py                          # per-day report
-python3 -m unittest tests.test_ledger -v   # 23 tests, all pass
-python3 -m unittest -v                     # 24 tests: 1 fails on purpose (tests/test_known_failure.py)
+python3 -m unittest tests.test_ledger -v   # 27 tests, all pass
+python3 -m unittest -v                     # 28 tests: 1 fails on purpose (tests/test_known_failure.py)
 ```
 
 ## Reading the output

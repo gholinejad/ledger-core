@@ -47,7 +47,11 @@ Each entry gives the ambiguity, how I resolved it, and what would change under t
 
 13. **Is the Day 6 closing balance before or after capitalisation?**
     **Resolved:** after. The INTEREST credit is dated Day 6, so it belongs in the printed Day 6 closing balance: 285.79, not 285.00.
-    **But the Day 6 fee test and accrual read the balance before capitalisation.** Capitalisation is the last act of the window. If the fee test counted it, a capitalised credit could cancel the Day 6 overdraft that decides the Day 6 accrual, which is part of that same credit. That is circular, and the restatement would stop being idempotent: a second run would reverse a fee the first run posted. Both readings give 285.79 for this stream. They differ only when interest alone would lift Day 6 above zero (tested: `test_restatement_is_idempotent_after_capitalisation`).
+    **But the Day 6 fee test and accrual read the balance before capitalisation.** Capitalisation is the last act of the window. If the fee test counted it, a capitalised credit could cancel the Day 6 overdraft that decides the Day 6 accrual, which is part of that same credit. That is circular, and the restatement would stop being idempotent. A second run after capitalisation would change what the first run posted in two ways:
+    - It would reverse a Day 6 fee once interest brings Day 6 to zero or above.
+    - On any positive account it would accrue Day 6 interest on the capitalised interest itself, so the accruals would no longer sum to the capitalised credit.
+
+    Both readings give 285.79 for this stream. The tests are `test_restatement_is_idempotent_after_capitalisation` and `test_accrual_restatement_ignores_the_capitalised_credit`.
 
 ## Authorizations and settlements
 
@@ -75,7 +79,12 @@ Each entry gives the ambiguity, how I resolved it, and what would change under t
 20. **The value date of a reversal.** E9 is dated Day 2, the same as E7.
     **Resolved:** the reversal uses the value date it is given. If that differed from the original's, the effect would apply from the reversal's own date.
     **Scope:** a reversal undoes every money entry the target event caused, matched on the entry's `event` field. That covers CREDIT, DEBIT, SETTLEMENT and FORCE_POST, and includes all three E10 instalments. Reversing a FORCE_POST is the chargeback credit when a dispute is won. Fees and interest are never reversed by hand, because the close owns them.
-    **Refused with an ERROR:** a reversal on a different account from the target's, a second reversal of the same event, and a target that moved no money (a hold) or does not exist.
+    **Refused with an ERROR, before the reversal's ID is consumed:**
+    - a reversal on a different account from the target's;
+    - a second reversal of the same event;
+    - a reversal of a reversal;
+    - a target that moved no money (a hold) or does not exist;
+    - a reversal that carries an amount. A reversal is always full; partial reversals are not supported.
 
 21. **A reversal does not reverse decisions.**
     **Resolved:** E9 reverses money, not the Auth-B decline. The decline was communicated to the merchant on Day 5 and stays DECLINED. See criterion 6 in REJECTED.md.
@@ -90,8 +99,11 @@ Each entry gives the ambiguity, how I resolved it, and what would change under t
     **Resolved:** each of the following is refused with an ERROR before its ID is consumed, so a corrected retry can reuse the ID:
     - a future value date;
     - an unknown event type;
-    - a non-positive amount;
+    - a non-positive amount on a credit, debit or settlement;
+    - a negative authorization. Zero is allowed: it is a card's account-verification check and holds nothing.
+    - a credit split into fewer than one part;
     - a missing value date;
     - any event that arrives after Day 6 has been capitalised.
 
-    Nothing raises out of `apply()`, so a bad event cannot stop the replay.
+    For well-typed events nothing raises out of `apply()`. A field of the wrong Python type, such as `value_day="1"`, still raises a TypeError, because type checking belongs to the parser that would build the events.
+    A refused event still advances the business day, because its arrival is a fact about the stream even when its content is not.

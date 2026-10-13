@@ -188,16 +188,38 @@ class Ledger:
         """Why this event cannot be posted on the current day, or None."""
         if ev.type not in EVENT_TYPES:
             return f"unknown event type {ev.type}"
-        if ev.type != "REVERSAL" and ev.amount <= 0:
+        if ev.type == "AUTHORIZATION":
+            # zero is allowed: a card's account-verification check holds nothing
+            return "amount must not be negative" if ev.amount < 0 else None
+        if ev.type == "REVERSAL":
+            if ev.amount != 0:
+                return "a reversal is always full and carries no amount (partial reversals are not supported)"
+        elif ev.amount <= 0:
             return "amount must be positive"
         if ev.type == "CREDIT" and ev.parts < 1:
             return "parts must be at least 1"
-        if ev.type == "AUTHORIZATION":
-            return None                       # a hold has no value date on the ledger
         if ev.value_day is None:
             return "value date missing"
         if not FIRST_DAY <= ev.value_day <= self.day:
             return f"value Day {ev.value_day} is outside Day {FIRST_DAY}..{self.day} (future value dates are not supported)"
+        if ev.type == "REVERSAL":
+            return self._reversal_problem(ev)
+        return None
+
+    def _reversal_problem(self, ev: Event) -> str | None:
+        """Checked before the reversal's id is recorded, so a corrected retry can reuse it."""
+        if ev.target not in self.received:
+            return f"nothing to reverse: no event {ev.target}"
+        caused = [e for e in self.entries if e.event == ev.target]
+        targets = [e for e in caused if e.kind in REVERSIBLE]
+        if not targets:
+            if caused:
+                return f"{ev.target} is itself a reversal; only the original money movement can be reversed"
+            return f"nothing to reverse: {ev.target} moved no money (a hold or a refusal)"
+        if any(t.account != ev.account for t in targets):
+            return f"{ev.target} belongs to {targets[0].account}, not {ev.account}"
+        if any(e.kind == "REVERSAL" and e.reverses == ev.target for e in self.entries):
+            return f"{ev.target} is already reversed"
         return None
 
     def _credit(self, ev: Event) -> None:
@@ -248,20 +270,9 @@ class Ledger:
 
         A reversal undoes money, never a decision: authorization states are untouched.
         Reversing a FORCE_POST is the chargeback credit when a dispute is won.
+        Every refusal is decided earlier, in _reversal_problem.
         """
-        if ev.target not in self.received:
-            self._notice(ev.id, "ERROR", f"nothing to reverse: no event {ev.target}")
-            return
         targets = [e for e in self.entries if e.event == ev.target and e.kind in REVERSIBLE]
-        if not targets:
-            self._notice(ev.id, "ERROR", f"nothing to reverse: {ev.target} moved no money (a hold or a refusal)")
-            return
-        if any(t.account != ev.account for t in targets):
-            self._notice(ev.id, "ERROR", f"{ev.target} belongs to {targets[0].account}, not {ev.account}")
-            return
-        if any(e.kind == "REVERSAL" and e.reverses == ev.target for e in self.entries):
-            self._notice(ev.id, "ERROR", f"{ev.target} is already reversed")
-            return
         for t in targets:
             self._post(ev.account, "REVERSAL", -t.amount, ev.value_day, ev.id, reverses=ev.target, event=ev.id)
 
