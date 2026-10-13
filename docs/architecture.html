@@ -23,8 +23,11 @@
   th, td { text-align: left; vertical-align: top; padding: 3pt 5pt; border-bottom: 1px solid var(--rule); }
   th { background: var(--tint); font-weight: 600; }
   tr { break-inside: avoid; }
-  .box { background: var(--tint); border-left: 3px solid var(--accent); padding: 5pt 8pt; margin: 4pt 0 7pt; }
+  .box { background: var(--tint); border-left: 3px solid var(--accent); padding: 5pt 8pt; margin: 4pt 0 7pt; break-inside: avoid; }
   .muted { color: var(--muted); }
+  .fig { margin: 4pt 0 7pt; break-inside: avoid; }
+  .fig img { width: 100%; display: block; }
+  .fig figcaption { font-size: 8.4pt; color: var(--muted); margin-top: 2pt; }
 </style>
 </head>
 <body>
@@ -32,7 +35,7 @@
 <h1>In-Memory Account Ledger Core: Architecture and Trade-offs</h1>
 <p class="sub">Matt Gholinejad · Staff Software Engineer take-home · repository: <code>ledger-core</code> (Python, standard library only)</p>
 
-<p>The core keeps three append-only logs: ledger <b>entries</b>, interest <b>accrual memos</b> and <b>authorization transitions</b>. Money is stored as integer minor units. A back-valued event never edits the past. Instead, every end-of-day close re-evaluates each day of the window as it is now known and posts only the difference, as <code>FEE</code>/<code>FEE_REVERSAL</code> entries or accrual deltas. Stream order is processing order, so a late event is posted on the day it arrives and flagged. Everything below follows from those choices.</p>
+<p>The core keeps three append-only logs: ledger <b>entries</b>, interest <b>accrual memos</b> and <b>authorization transitions</b>. Money is stored as integer minor units. A back-valued event never edits the past. Instead, every end-of-day close re-evaluates each day of the window as it is now known and posts only the difference, as <code>FEE</code>/<code>FEE_REVERSAL</code> entries or accrual deltas. Stream order is processing order, so a late event inside the window is posted on the day it arrives and flagged. Everything below follows from those choices.</p>
 
 <h2>1. Append-only at scale</h2>
 <h3>What breaks first at 100× volume</h3>
@@ -41,7 +44,7 @@
 <p>for these reasons:</p>
 <ul>
   <li><code>balance(account, day)</code> scans the whole entry list, including other accounts' entries.</li>
-  <li>The close calls it twice per account per day, for every day back to Day 1.</li>
+  <li>For every account and every day back to Day 1, the close runs three <code>balance()</code> calls (two to restate the day, one for the report), plus a fee scan and an accrual scan.</li>
 </ul>
 <p>Both the number of entries and the number of days grow with history, so the close is quadratic in history and also multiplied by the number of accounts. At 100× volume the close no longer fits its batch window long before posting slows down. This is the same failure pattern as a nightly settlement job that drifts from 1 hour to 4: the per-record cost isn't the problem, the growth curve is.</p>
 
@@ -50,9 +53,10 @@
 <tr><th>Structure</th><th>Why it grows</th><th>Bounded by</th></tr>
 <tr><td><code>entries</code></td><td>Append-only by definition. This is correct and must be kept.</td><td>Nothing in-memory. It needs tiered storage.</td></tr>
 <tr><td>Restatement horizon</td><td>Every close re-tests every day back to Day 1.</td><td>Nothing. This is the real problem.</td></tr>
-<tr><td><code>received</code> (dedupe IDs)</td><td>Every event ID is kept forever, and the lookup is a linear scan.</td><td>Nothing.</td></tr>
+<tr><td><code>received</code> (dedupe IDs)</td><td>Every accepted event ID is kept forever, and the lookup is a linear scan.</td><td>Nothing.</td></tr>
 <tr><td><code>auth_log</code></td><td>Holds never expire. An approved, never-settled authorization stays active forever and so does its hold.</td><td>Nothing (see §3).</td></tr>
-<tr><td><code>reported</code>, <code>reports</code>, <code>notices</code></td><td>One row per account per day.</td><td>Nothing.</td></tr>
+<tr><td><code>accruals</code></td><td>Every restatement that changes a day's accrual appends a delta, and the whole log is scanned for every account-day.</td><td>Nothing.</td></tr>
+<tr><td><code>reported</code>, <code>reports</code>, <code>notices</code></td><td>One printed figure per account per day and one report per day. Notices: up to three per event (a WARNING if late, an INFO if back-valued, and an ERROR if refused or an EXCEPTION such as every force-post or over-hold settlement), plus one ERROR at every close for each day a non-AED account is overdrawn.</td><td>Nothing.</td></tr>
 </table>
 
 <h3>Cheapest structural change</h3>
@@ -62,7 +66,8 @@
   <li>When an entry posts with value day <i>v</i>, set <code>dirty_from[account] = min(dirty_from, v)</code>.</li>
   <li>The close re-tests only <i>dirty</i> accounts, and only from <code>dirty_from</code> forward. Each day's balance is the previous snapshot plus that day's entries.</li>
 </ul>
-<p style="margin:3pt 0 0">The cost drops to <code>touched accounts × days since earliest back-value</code>. The entry log stays the source of truth: snapshots are a derived cache and can always be rebuilt by replay. Indexing entries by account is a one-line change that comes with it.</p></div>
+<p style="margin:3pt 0 0">The cost drops to <code>accounts (today only) + dirty account-days since each back-value</code>. The entry log stays the source of truth: snapshots are a derived cache and can always be rebuilt by replay. Indexing entries by account is a one-line change that comes with it.</p></div>
+<figure class="fig"><img src="img/close-cost.svg" alt="Close cost before and after the snapshot change"><figcaption>Each square is one account-day the close computes. Today must always be computed for every account. Beyond that, a back-value marks its account dirty from that day forward, and clean account-days are read from the snapshot.</figcaption></figure>
 <p>This defers the problem but does not remove it. A back-value to Day 1 still re-walks every day. The structural fix is a <b>sealed period</b>. After a period close, no entry may carry a value date inside it. A correction posts on the current date with a reference to the original, so the restatement horizon becomes bounded by policy, not by history. At that point the log can also be partitioned by account and by period, and sealed periods can move to cold storage with a checkpoint balance. The <code>received</code> set becomes an idempotency store with a TTL that matches the scheme's maximum retry window. I built that pattern for Colourlab AI's admin money actions (refunds, credit adjustments, grants). The key is unique per operator and key. A replay returns the first result, and the same key with a different payload gets a typed <code>409</code>.</p>
 
 <h2>2. Value-dated entries in production</h2>
@@ -74,17 +79,20 @@
   <li><b>AML and audit trail.</b> Back-dating is a known way to disguise the order of transactions. Investigators and the UAE FIU need both timelines, value date and booking date, and the identity of whoever back-dated. The same principle drove Triton's alert-ingest contract: every event carries both the device time and the broker receipt time, because I measured a device clock running 89 minutes fast. The UAE AML law requires transaction records to be retained for at least five years.</li>
   <li><b>Operations.</b> Every back-value creates reconciliation breaks against scheme settlement files and nostro statements, and exceptions that need ownership and an SLA.</li>
 </ul>
+<figure class="fig"><img src="img/backvalue-gate.svg" alt="Back-valuation gate with maker-checker"><figcaption>The gate, in the order its checks run.</figcaption></figure>
 <div class="box"><b>One control before go-live: a back-valuation gate with maker-checker approval.</b>
 <ul>
   <li>Any entry whose value date is earlier than the current business date needs a reason code and a second approver.</li>
   <li>No entry may cross a sealed period.</li>
-  <li>System-generated compensations, such as fee reversals and accrual deltas, are exempt, because they are derived and reproducible.</li>
+  <li>Entries the close itself generates (fees, fee reversals, capitalised interest) are exempt, because they are derived and reproducible. Accrual deltas are memos, not ledger entries, so the gate never sees them.</li>
   <li>All other back-valued entries feed a daily report reviewed by Finance and Compliance, showing customer impact (fees, interest) per entry.</li>
 </ul>
 <p style="margin:3pt 0 0">In this core that means one check in <code>_post</code> plus an <code>approved_by</code> field on the entry. The record stays append-only, and the gate controls who may write it.</p></div>
 
+
 <h2>3. Authorization lifecycle</h2>
-<p>In this model an authorization has three states: <code>APPROVED</code>, <code>DECLINED</code> and <code>SETTLED</code>. Apart from a matching settlement it can end in only these ways. Each row gives the real-world scenario and the behaviour I would mandate.</p>
+<p>In this model an authorization has three states: <code>APPROVED</code>, <code>DECLINED</code> and <code>SETTLED</code>. Apart from a matching settlement it can end in only these ways. Each row gives the real-world scenario and the behaviour I would mandate. A request refused before any state exists (negative amount, unknown account, closed window) never becomes an authorization.</p>
+<figure class="fig"><img src="img/auth-lifecycle.svg" alt="Authorization lifecycle"><figcaption>Solid: the three states in the model. Dashed: exits production needs; EXPIRED is the table's third row, VOIDED is listed under the table. A settlement with no APPROVED authorization creates no state: it posts a FORCE_POST entry and an EXCEPTION.</figcaption></figure>
 <table>
 <tr><th style="width:23%">How it ends in my model</th><th style="width:33%">Real-world scenario</th><th>Behaviour I would mandate</th></tr>
 <tr><td><b>Declined at birth</b> (available &lt; 0 after the hold). Auth-B.</td><td>Insufficient funds. The merchant was told "declined" in real time.</td><td>This is terminal and immutable. A later credit or reversal (E9) must never approve it again. A retry by the merchant is a new authorization with its own decision.</td></tr>
@@ -109,7 +117,9 @@
 <tr><td>Stream order is the clock, with no late-arrival cut-off</td><td>The brief fixes the order.</td><td>A statement goes out wrong, as with Day 5 for ACC-002, which the failing test shows. Production needs a cut-off time per booking day and correction notices.</td></tr>
 <tr><td>No hold expiry, void, or incremental authorization</td><td>Not in the stream.</td><td>Holds that never release, so customers see less available balance than they have (§3).</td></tr>
 <tr><td>A flat 0.04 % per day with per-day rounding</td><td>Matches the rule as written.</td><td>No day-count convention or tiers. Rounding drift of up to ±0.005 per day (0.79 paid against an exact 0.802).</td></tr>
-<tr><td>Fee in AED only, no FX</td><td>The brief prices only an AED fee.</td><td>A non-AED account can't be charged. The core raises an error rather than guessing a rate.</td></tr>
+<tr><td>Fee in AED only, no FX</td><td>The brief prices only an AED fee.</td><td>A non-AED account can't be charged. The close records an ERROR notice rather than guessing a rate.</td></tr>
+<tr><td>Debits always post; no overdraft limit</td><td>The brief tests fees, not limits.</td><td>A customer can be overdrawn without bound. Production needs a limit, and a decline path for debits.</td></tr>
+<tr><td>No future-dated entries</td><td>The stream has none.</td><td>Scheduled payments can't be booked ahead. An entry whose value date is after the day it is processed is refused with an ERROR, not posted.</td></tr>
 <tr><td>Days without a calendar</td><td>The window is abstract.</td><td>Weekends, holidays and cut-off times change value dates and fee days.</td></tr>
 <tr><td>No operator identity, reason codes or approvals on entries</td><td>No users in scope.</td><td>No audit of who back-valued what, and no maker-checker (§2).</td></tr>
 </table>
