@@ -46,7 +46,8 @@ Each entry gives the ambiguity, how I resolved it, and what would change under t
     **Resolved:** they are recalculated at every close, and the difference is posted as an accrual delta. The capitalised amount is the sum of all accrual records, which equals the sum of the final rounded daily accruals. This is checked by a test.
 
 13. **Is the Day 6 closing balance before or after capitalisation?**
-    **Resolved:** after. The INTEREST credit is dated Day 6, so it belongs in the Day 6 closing balance: 285.79, not 285.00.
+    **Resolved:** after. The INTEREST credit is dated Day 6, so it belongs in the printed Day 6 closing balance: 285.79, not 285.00.
+    **But the Day 6 fee test and accrual read the balance before capitalisation.** Capitalisation is the last act of the window. If the fee test counted it, a capitalised credit could cancel the Day 6 overdraft that decides the Day 6 accrual, which is part of that same credit. That is circular, and the restatement would stop being idempotent: a second run would reverse a fee the first run posted. Both readings give 285.79 for this stream. They differ only when interest alone would lift Day 6 above zero (tested: `test_restatement_is_idempotent_after_capitalisation`).
 
 ## Authorizations and settlements
 
@@ -72,7 +73,9 @@ Each entry gives the ambiguity, how I resolved it, and what would change under t
 ## Reversals
 
 20. **The value date of a reversal.** E9 is dated Day 2, the same as E7.
-    **Resolved:** the reversal uses the value date it is given. If that differed from the original's, the effect would apply from the reversal's own date. A reversal undoes every CREDIT or DEBIT entry of the target event. A second reversal of the same event is refused with an ERROR.
+    **Resolved:** the reversal uses the value date it is given. If that differed from the original's, the effect would apply from the reversal's own date.
+    **Scope:** a reversal undoes every money entry the target event caused, matched on the entry's `event` field. That covers CREDIT, DEBIT, SETTLEMENT and FORCE_POST, and includes all three E10 instalments. Reversing a FORCE_POST is the chargeback credit when a dispute is won. Fees and interest are never reversed by hand, because the close owns them.
+    **Refused with an ERROR:** a reversal on a different account from the target's, a second reversal of the same event, and a target that moved no money (a hold) or does not exist.
 
 21. **A reversal does not reverse decisions.**
     **Resolved:** E9 reverses money, not the Auth-B decline. The decline was communicated to the merchant on Day 5 and stays DECLINED. See criterion 6 in REJECTED.md.
@@ -82,3 +85,13 @@ Each entry gives the ambiguity, how I resolved it, and what would change under t
 22. **What a "day" is.** These are business days 1 to 6, with no calendar, weekends, holidays or time zone. The end-of-day close runs when the stream moves to a later day, and after the last event.
 
 23. **Duplicate event IDs.** An event ID that has already been seen is ignored with an ERROR. A real system would make this idempotent by key and payload hash; see the architecture document.
+
+24. **Invalid events and a closed window.** The brief's stream has none of these, but a ledger must still decide what happens to them.
+    **Resolved:** each of the following is refused with an ERROR before its ID is consumed, so a corrected retry can reuse the ID:
+    - a future value date;
+    - an unknown event type;
+    - a non-positive amount;
+    - a missing value date;
+    - any event that arrives after Day 6 has been capitalised.
+
+    Nothing raises out of `apply()`, so a bad event cannot stop the replay.

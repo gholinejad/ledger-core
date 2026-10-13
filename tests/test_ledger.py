@@ -142,5 +142,74 @@ class Invariants(unittest.TestCase):
                 self.assertEqual(sum(split_evenly(total, parts)), total)
 
 
+def errors(ledger, source):
+    return [n.message for n in ledger.notices if n.source == source and n.level == "ERROR"]
+
+
+class EdgeCases(unittest.TestCase):
+    """Cases outside the brief's stream, found by the pre-submission review."""
+
+    def test_restatement_is_idempotent_after_capitalisation(self):
+        # Day 6 is negative only before the interest credit lands: the fee test and
+        # the accrual must read the same pre-capitalisation balance every time.
+        ledger = Ledger({A1: "AED"})
+        ledger.apply(Event("C", 1, "CREDIT", A1, 100000, value_day=1))
+        ledger.apply(Event("D", 6, "DEBIT", A1, 100050, value_day=6))
+        ledger.close_day()
+        entries, accruals = len(ledger.entries), len(ledger.accruals)
+        ledger.day = 6                           # re-run the Day 6 restatement by hand
+        for day in range(1, 7):
+            ledger._restate_fee(A1, "AED", day, "TEST")
+            ledger._restate_accrual(A1, day)
+        self.assertEqual((len(ledger.entries), len(ledger.accruals)), (entries, accruals))
+        self.assertEqual(ledger.fees_for_day(A1, 6), 2500)   # -0.50 before capitalisation
+
+    def test_events_after_the_window_closes_are_refused(self):
+        ledger = run()
+        before = len(ledger.entries)
+        ledger.apply(Event("LATE", 6, "DEBIT", A1, 100000, value_day=3))
+        self.assertEqual(len(ledger.entries), before)
+        self.assertTrue(errors(ledger, "LATE"))
+
+    def test_invalid_events_are_errors_and_keep_their_id(self):
+        ledger = replay_until("E2")
+        for bad in (Event("X", 1, "DEBIT", A1, 100, value_day=3),       # future value date
+                    Event("X", 1, "TRANSFER", A1, 100, value_day=1),    # unknown type
+                    Event("X", 1, "DEBIT", A1, -100, value_day=1),      # negative amount
+                    Event("X", 1, "REVERSAL", A1, target="E2")):        # no value date
+            ledger.apply(bad)
+        self.assertEqual(len(errors(ledger, "X")), 4)
+        ledger.apply(Event("X", 1, "DEBIT", A1, 100, value_day=1))     # the corrected retry
+        self.assertEqual(ledger.balance(A1, 1), 24900)
+
+    def test_reversal_must_name_the_targets_account(self):
+        ledger = replay_until("E8")
+        ledger.apply(Event("R", 5, "REVERSAL", A2, value_day=2, target="E7"))
+        self.assertEqual(kinds(ledger, "REVERSAL", A2), [])
+        self.assertTrue(errors(ledger, "R"))
+        ledger.apply(Event("E9", 6, "REVERSAL", A1, value_day=2, target="E7"))
+        self.assertEqual([e.amount for e in kinds(ledger, "REVERSAL")], [62000])   # the real one still works
+
+    def test_reversal_undoes_every_instalment(self):
+        ledger = run()
+        ledger.day = 6
+        ledger.apply(Event("R10", 6, "REVERSAL", A2, value_day=5, target="E10"))
+        self.assertEqual([e.amount for e in kinds(ledger, "REVERSAL", A2)], [-3333, -3333, -3334])
+        self.assertEqual(ledger.balance(A2, 5), 0)
+
+    def test_chargeback_credit_reverses_a_force_post(self):
+        ledger = replay_until("E6")
+        ledger.apply(Event("CB", 4, "REVERSAL", A1, value_day=4, target="E6"))
+        self.assertEqual([e.amount for e in kinds(ledger, "REVERSAL")], [18000])
+        self.assertEqual(ledger.balance(A1, 4), 46500)       # as if Auth-Z never settled
+
+    def test_reversing_a_hold_or_unknown_event_says_why(self):
+        ledger = replay_until("E3")
+        ledger.apply(Event("R3", 2, "REVERSAL", A1, value_day=2, target="E3"))
+        ledger.apply(Event("R99", 2, "REVERSAL", A1, value_day=2, target="E99"))
+        self.assertIn("moved no money", errors(ledger, "R3")[0])
+        self.assertIn("no event E99", errors(ledger, "R99")[0])
+
+
 if __name__ == "__main__":
     unittest.main()

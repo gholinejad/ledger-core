@@ -19,6 +19,8 @@ OVERDRAFT_FEE = {"AED": 2500}        # AED 25.00 in fils; no fee is defined for 
 DAILY_RATE = Decimal("0.0004")       # 0.04 % per day
 
 FEE_KINDS = ("FEE", "FEE_REVERSAL")
+REVERSIBLE = ("CREDIT", "DEBIT", "SETTLEMENT", "FORCE_POST")   # money an event moved; never fees or interest
+EVENT_TYPES = ("CREDIT", "DEBIT", "AUTHORIZATION", "SETTLEMENT", "REVERSAL")
 APPROVED, DECLINED, SETTLED = "APPROVED", "DECLINED", "SETTLED"
 
 
@@ -45,6 +47,7 @@ class Entry:
     booked_day: int    # the day the ledger actually recorded it
     source: str        # event id, or EOD<n> for entries the close generated
     reverses: str | None = None   # for REVERSAL: the event id it undoes
+    event: str | None = None      # the event that caused it (shared by all instalments); None for EOD entries
 
 
 @dataclass(frozen=True)
@@ -91,16 +94,22 @@ class Ledger:
         self.reports: list[dict] = []
 
     # ---------------------------------------------------------------- queries
-    def balance(self, account: str, as_of_day: int, exclude_fee_day: int | None = None) -> int:
+    def balance(self, account: str, as_of_day: int, exclude_fee_day: int | None = None,
+                before_capitalisation: bool = False) -> int:
         """Ledger balance = all entries with value_day <= as_of_day.
 
         exclude_fee_day leaves out that one day's own fee, so a fee can never
         justify itself when the overdraft test is re-run.
+        before_capitalisation leaves out the end-of-window INTEREST credit: the
+        fee test and the accrual both read the day as it stood before
+        capitalisation, otherwise the capitalised amount would feed back into
+        the Day 6 accrual it is the sum of.
         """
         return sum(
             e.amount for e in self.entries
             if e.account == account and e.value_day <= as_of_day
             and not (e.kind in FEE_KINDS and e.value_day == exclude_fee_day)
+            and not (before_capitalisation and e.kind == "INTEREST")
         )
 
     def auth_state(self, auth_id: str) -> AuthTransition | None:
@@ -129,10 +138,10 @@ class Ledger:
 
     # ---------------------------------------------------------------- writes
     def _post(self, account: str, kind: str, amount: int, value_day: int, source: str,
-              reverses: str | None = None) -> Entry:
+              reverses: str | None = None, event: str | None = None) -> Entry:
         if not FIRST_DAY <= value_day <= self.day:
             raise LedgerError(f"{source}: value day {value_day} outside Day {FIRST_DAY}..{self.day}")
-        entry = Entry(len(self.entries) + 1, account, kind, amount, value_day, self.day, source, reverses)
+        entry = Entry(len(self.entries) + 1, account, kind, amount, value_day, self.day, source, reverses, event)
         self.entries.append(entry)
         return entry
 
@@ -153,8 +162,15 @@ class Ledger:
         if ev.booked_day > LAST_DAY:
             self._notice(ev.id, "ERROR", f"booked Day {ev.booked_day} is outside the window, ignored")
             return
+        if self.day > LAST_DAY:
+            self._notice(ev.id, "ERROR", "the window is closed (Day 6 is capitalised), not posted")
+            return
         while self.day < ev.booked_day:       # stream moved on: close the days in between
             self.close_day()
+        problem = self._invalid(ev)
+        if problem:                           # refused before its id is consumed, so a fixed retry can use it
+            self._notice(ev.id, "ERROR", f"{problem}, not posted")
+            return
         self.received.append(ev.id)
         if ev.booked_day < self.day:
             self._notice(ev.id, "WARNING",
@@ -168,13 +184,29 @@ class Ledger:
         }[ev.type]
         handler(ev)
 
+    def _invalid(self, ev: Event) -> str | None:
+        """Why this event cannot be posted on the current day, or None."""
+        if ev.type not in EVENT_TYPES:
+            return f"unknown event type {ev.type}"
+        if ev.type != "REVERSAL" and ev.amount <= 0:
+            return "amount must be positive"
+        if ev.type == "CREDIT" and ev.parts < 1:
+            return "parts must be at least 1"
+        if ev.type == "AUTHORIZATION":
+            return None                       # a hold has no value date on the ledger
+        if ev.value_day is None:
+            return "value date missing"
+        if not FIRST_DAY <= ev.value_day <= self.day:
+            return f"value Day {ev.value_day} is outside Day {FIRST_DAY}..{self.day} (future value dates are not supported)"
+        return None
+
     def _credit(self, ev: Event) -> None:
         for i, part in enumerate(split_evenly(ev.amount, ev.parts), start=1):
             source = ev.id if ev.parts == 1 else f"{ev.id}#{i}"
-            self._post(ev.account, "CREDIT", part, ev.value_day, source)
+            self._post(ev.account, "CREDIT", part, ev.value_day, source, event=ev.id)
 
     def _debit(self, ev: Event) -> None:
-        self._post(ev.account, "DEBIT", -ev.amount, ev.value_day, ev.id)
+        self._post(ev.account, "DEBIT", -ev.amount, ev.value_day, ev.id, event=ev.id)
 
     def _authorize(self, ev: Event) -> None:
         if self.auth_state(ev.auth_id) is not None:
@@ -193,7 +225,7 @@ class Ledger:
         auth = self.auth_state(ev.auth_id)
         ccy = self.ccy[ev.account]
         if auth is not None and auth.state == APPROVED and auth.account == ev.account:
-            self._post(ev.account, "SETTLEMENT", -ev.amount, ev.value_day, ev.id)
+            self._post(ev.account, "SETTLEMENT", -ev.amount, ev.value_day, ev.id, event=ev.id)
             released = auth.amount - ev.amount
             self._auth(ev.auth_id, ev.account, SETTLED, 0, ev.id,
                        f"settled {fmt(ev.amount, ccy)}; hold {fmt(auth.amount, ccy)} released"
@@ -206,21 +238,32 @@ class Ledger:
         # merchant, so refusing the debit would not stop the money leaving the
         # bank. Post it, and raise it for dispute / chargeback review.
         why = "unknown authorization" if auth is None else f"authorization is {auth.state}"
-        self._post(ev.account, "FORCE_POST", -ev.amount, ev.value_day, ev.id)
+        self._post(ev.account, "FORCE_POST", -ev.amount, ev.value_day, ev.id, event=ev.id)
         self._notice(ev.id, "EXCEPTION",
                      f"{ev.auth_id}: {why}; {fmt(ev.amount, ccy)} force-posted, "
                      f"queued for chargeback review")
 
     def _reverse(self, ev: Event) -> None:
-        targets = [e for e in self.entries if e.source == ev.target and e.kind in ("CREDIT", "DEBIT")]
+        """Undo the money an earlier event moved: every entry it caused, instalments included.
+
+        A reversal undoes money, never a decision: authorization states are untouched.
+        Reversing a FORCE_POST is the chargeback credit when a dispute is won.
+        """
+        if ev.target not in self.received:
+            self._notice(ev.id, "ERROR", f"nothing to reverse: no event {ev.target}")
+            return
+        targets = [e for e in self.entries if e.event == ev.target and e.kind in REVERSIBLE]
         if not targets:
-            self._notice(ev.id, "ERROR", f"nothing to reverse: {ev.target} has no ledger entry")
+            self._notice(ev.id, "ERROR", f"nothing to reverse: {ev.target} moved no money (a hold or a refusal)")
+            return
+        if any(t.account != ev.account for t in targets):
+            self._notice(ev.id, "ERROR", f"{ev.target} belongs to {targets[0].account}, not {ev.account}")
             return
         if any(e.kind == "REVERSAL" and e.reverses == ev.target for e in self.entries):
             self._notice(ev.id, "ERROR", f"{ev.target} is already reversed")
             return
         for t in targets:
-            self._post(ev.account, "REVERSAL", -t.amount, ev.value_day, ev.id, reverses=ev.target)
+            self._post(ev.account, "REVERSAL", -t.amount, ev.value_day, ev.id, reverses=ev.target, event=ev.id)
 
     # ---------------------------------------------------------------- end of day
     def close_day(self) -> dict:
@@ -247,7 +290,7 @@ class Ledger:
         return report
 
     def _restate_fee(self, account: str, ccy: str, day: int, source: str) -> None:
-        before_own_fee = self.balance(account, day, exclude_fee_day=day)
+        before_own_fee = self.balance(account, day, exclude_fee_day=day, before_capitalisation=True)
         owed = 0
         if before_own_fee < 0:
             if ccy not in OVERDRAFT_FEE:
@@ -261,7 +304,7 @@ class Ledger:
             self._post(account, "FEE_REVERSAL", -delta, day, source)
 
     def _restate_accrual(self, account: str, day: int) -> None:
-        closing = self.balance(account, day)
+        closing = self.balance(account, day, before_capitalisation=True)
         owed = apply_rate(closing, DAILY_RATE) if closing > 0 else 0
         delta = owed - self.accrual_for_day(account, day)
         if delta:
