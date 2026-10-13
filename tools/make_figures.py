@@ -48,7 +48,7 @@ def svg(w, h, body, label):
 
 
 def close_cost():
-    """What one end-of-day close re-walks today, and after the snapshot + dirty-from change."""
+    """What one end-of-day close computes today, and after the snapshot + dirty-from change."""
     W, H = 760, 214
     days, accts, cw, ch = 12, 5, 24, 20
     b = ""
@@ -60,59 +60,65 @@ def close_cost():
             for d in range(days):
                 on = shade(a, d)
                 o += rect(x0 + d * cw, 62 + a * ch, cw - 3, ch - 3, ACC if on else SOFT, ACC if on else RULE, 0.8, 2)
-        o += t(x0, 62 + accts * ch + 16, "day 1", 10, MUTED) + t(x0 + (days - 1) * cw + cw - 3, 62 + accts * ch + 16, f"day {days}", 10, MUTED, 400, "end")
+        o += t(x0, 62 + accts * ch + 16, "day 1", 10, MUTED)
+        o += t(x0 + (days - 1) * cw + cw - 3, 62 + accts * ch + 16, f"today (day {days})", 10, MUTED, 400, "end")
         return o
     b += grid(56, "Today: every close re-tests every day of every account",
               "cost ≈ accounts × days × entries (balance() scans the whole log)", lambda a, d: True)
     b += grid(446, "After: daily snapshots + a dirty-from mark per account",
-              "cost ≈ touched accounts × days since the earliest back-value", lambda a, d: (a == 1 and d >= 3) or (a == 3 and d >= 9))
+              "cost ≈ accounts + dirty account-days since each back-value",
+              lambda a, d: d == days - 1 or (a == 1 and d >= 3) or (a == 3 and d >= 9))
     b += t(446 + 3 * cw, 56, "▼ back-value lands on day 4", 10.5, RED, 700)
     return svg(W, H, b, "Close cost before and after the snapshot change")
 
 
 def backvalue_gate():
-    """The one control before go-live."""
-    W, H = 760, 150
+    """The one control before go-live, in the order its checks run."""
+    W, H = 760, 176
     b = ""
-    boxes = [(8, 150, "entry arrives", "value date vs business date", SOFT, INK2),
-             (186, 168, "value date < today?", "system compensations exempt", ACCS, ACC),
-             (382, 160, "reason code + checker", "a second person approves", WARNS, WARN),
-             (570, 182, "inside a sealed period?", "yes: refuse, post today", REDS, RED)]
-    for x, w, n, s, cs, c in boxes:
-        b += rect(x, 14, w, 58, cs, c, 1.6, 8) + t(x + 10, 38, n, 12.5, c, 700) + t(x + 10, 57, s, 10.5, INK2)
-    b += line(158, 43, 184, 43, INK2, 1.6, arrow=True)
-    b += line(354, 43, 380, 43, INK2, 1.6, arrow=True) + t(367, 34, "yes", 10, MUTED, 600, "middle")
-    b += line(542, 43, 568, 43, INK2, 1.6, arrow=True)
-    b += rect(382, 98, 370, 44, OKS, OK, 1.4, 8)
-    b += t(394, 117, "every back-valued entry → daily report to Finance + Compliance", 11, OK, 650)
-    b += t(394, 133, "with its fee and interest impact per customer", 10.5, INK2)
-    b += line(462, 72, 462, 96, OK, 1.4, arrow=True)
+    y0, h = 40, 56
+    boxes = [(8, 120, "entry arrives", "", SOFT, INK2),
+             (150, 136, "value date", "before today?", ACCS, ACC),
+             (310, 136, "crosses a", "sealed period?", REDS, RED),
+             (470, 120, "system", "compensation?", SOFT, INK2),
+             (614, 138, "reason code", "+ second approver", WARNS, WARN)]
+    for x, w, n, s2, cs, c in boxes:
+        b += rect(x, y0, w, h, cs, c, 1.6, 8) + t(x + 10, y0 + 23, n, 12, c, 700)
+        if s2:
+            b += t(x + 10, y0 + 41, s2, 12, c, 700)
+    for x1, x2, lab in ((128, 148, ""), (286, 308, "yes"), (446, 468, "no"), (590, 612, "no")):
+        b += line(x1, y0 + 28, x2, y0 + 28, INK2, 1.6, arrow=True)
+        if lab:
+            b += t((x1 + x2) / 2, y0 + 20, lab, 10, MUTED, 600, "middle")
+    b += line(218, y0 + h, 218, 128, OK, 1.4, arrow=True) + t(226, 122, "no: post normally", 10.5, OK, 600)
+    b += line(378, y0 + h, 378, 150, RED, 1.4, arrow=True) + t(386, 146, "yes: refuse; post today with a reference", 10.5, RED, 600)
+    b += line(530, y0 + h, 530, 128, OK, 1.4, arrow=True) + t(538, 122, "yes: post, exempt", 10.5, OK, 600)
+    b += line(683, y0 + h, 683, 150, WARN, 1.4, arrow=True)
+    b += t(752, 166, "approved: post + daily report to Finance and Compliance", 10.5, WARN, 600, "end")
+    b += t(8, 22, "Checks run left to right; fee reversals and accrual deltas are system compensations", 11, MUTED)
     return svg(W, H, b, "Back-valuation gate with maker-checker")
 
 
 def auth_lifecycle():
-    """States the model has (solid) and the exits production needs (dashed)."""
-    W, H = 760, 250
+    """The three states the model has (solid) and the exits production needs (dashed)."""
+    W, H = 760, 262
     b = ""
 
     def node(x, y, w, h, name, sub, c, cs, dash=""):
         return (rect(x, y, w, h, cs, c, 2, 10, dash) + t(x + w / 2, y + h / 2 - 2, name, 13.5, c, 800, "middle")
                 + t(x + w / 2, y + h / 2 + 15, sub, 10.5, INK2, 400, "middle"))
-    b += f"<circle cx='26' cy='118' r='8' fill='{INK}'/>"
-    b += line(35, 118, 104, 118, INK2, 1.8, arrow=True) + t(70, 108, "authorize", 10.5, MUTED, 600, "middle")
-    b += node(106, 84, 150, 68, "APPROVED", "hold reduces available", ACC, ACCS)
-    b += curve("M30 126 C 40 200, 70 214, 104 214", RED) + t(8, 168, "available < 0", 10, RED, 600)
-    b += node(106, 182, 150, 60, "DECLINED", "final; never re-approved", RED, REDS)
-    b += line(256, 118, 364, 118, OK, 1.8, arrow=True) + t(310, 108, "matching", 10.5, OK, 700, "middle") + t(310, 136, "settlement", 10.5, OK, 700, "middle")
-    b += node(366, 84, 150, 68, "SETTLED", "hold released", OK, OKS)
-    b += node(366, 6, 150, 56, "EXPIRED", "needs a hold TTL", OLD, "#fff", "6 4")
-    b += curve("M200 82 C 220 34, 280 32, 364 32", OLD, 1.5, "6 4")
-    b += node(560, 6, 192, 56, "VOIDED", "merchant / timeout reversal", OLD, "#fff", "6 4")
-    b += curve("M256 100 C 400 76, 480 54, 558 38", OLD, 1.5, "6 4")
-    b += node(560, 182, 192, 60, "FORCE_POST", "post + EXCEPTION for review", WARN, WARNS)
-    b += curve("M540 150 C 580 160, 620 166, 650 180", WARN)
-    b += t(530, 146, "settlement with no approved authorization", 10.5, WARN, 600)
-    b += t(560, 100, "dashed = not modelled,", 10.5, MUTED, 600) + t(560, 115, "needed before production", 10.5, MUTED, 600)
+    b += f"<circle cx='26' cy='134' r='8' fill='{INK}'/>"
+    b += line(35, 134, 140, 134, INK2, 1.8, arrow=True) + t(86, 116, "after hold", 10, INK2, 600, "middle") + t(86, 128, "≥ 0", 10, INK2, 600, "middle")
+    b += node(142, 100, 150, 68, "APPROVED", "hold reduces available", ACC, ACCS)
+    b += curve("M26 143 C 26 205, 70 226, 140 226", RED) + t(40, 182, "after hold < 0", 10, RED, 600)
+    b += node(142, 196, 150, 60, "DECLINED", "final; never re-approved", RED, REDS)
+    b += line(292, 134, 418, 134, OK, 1.8, arrow=True) + t(355, 124, "matching", 10.5, OK, 700, "middle") + t(355, 152, "settlement", 10.5, OK, 700, "middle")
+    b += node(420, 100, 150, 68, "SETTLED", "hold released", OK, OKS)
+    b += node(420, 6, 150, 52, "EXPIRED", "needs a hold TTL", OLD, "#fff", "6 4")
+    b += curve("M190 98 C 200 40, 300 32, 418 32", OLD, 1.5, "6 4")
+    b += node(600, 6, 152, 52, "VOIDED", "merchant reversal", OLD, "#fff", "6 4")
+    b += curve("M292 108 C 400 78, 560 80, 640 60", OLD, 1.5, "6 4")
+    b += t(600, 200, "dashed = not modelled,", 10.5, MUTED, 600) + t(600, 215, "needed before production", 10.5, MUTED, 600)
     return svg(W, H, b, "Authorization lifecycle")
 
 
