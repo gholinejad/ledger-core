@@ -26,7 +26,7 @@ E7 does not touch only Day 2. It is dated Day 2, so it lowers the closing balanc
 
 E7 causes **three** fees (Days 2, 4 and 5), assessed at the Day 5 close. Without the force-posted E6, Day 4 would be −180.00 and still three fees. The criterion counts only the day the entry is dated, not the days it carries forward into. Test: `test_c2_e7_causes_three_fees_not_one`.
 
-**It is wrong under the other reading too.** Suppose a closed day is never re-tested, so each close tests only its own day (AMBIGUITIES #3). Then E7 causes exactly one fee, but it is dated **Day 5**, not Day 2: Day 5 closes at −360.00, and Day 6 at 260.67 with 0.67 interest. There is no reading under which the criterion holds.
+**It is wrong under other reading 2 too.** Suppose a closed day is never re-tested: each close tests the fee and accrues interest for its own day only (AMBIGUITIES #3, reproduced by `python3 tools/other_reading.py`). Then E7 causes exactly one fee, but it is dated **Day 5**, not Day 2: Day 5 closes at −360.00, and Day 6 at 260.67 with 0.67 interest. There is no reading under which the criterion holds: under every reading Day 5 is −335.00 before any fee, so at least the Day 5 test is negative.
 
 ### Criterion 4: "Any settlement referencing an authorization ID not present in the ledger must be rejected and the funds must not leave the account"
 
