@@ -19,13 +19,13 @@ The whole design comes down to one idea: **the past is never edited.** Every end
 | **Authorizations** | Auth-A: APPROVED on Day 2, SETTLED at 185.00 on Day 4. Auth-B: **DECLINED** on Day 5, because available would be −425.00. Auth-Z: no authorization, so it is force-posted and raised as an exception | |
 | **Acceptance criteria** | Accepted: **1, 3, 5**. Rejected: **2** (one fee), **4** (reject unmatched settlement), **6** (everything returns after E9), **7** (3.334 instalments), **8** (discard the remainder). Reasons in [REJECTED.md](REJECTED.md) | |
 
-Every figure is derived by hand in [NUMBERS.md](NUMBERS.md). The tests assert the fee days, the final balances of both accounts, Auth-B's decline and every criterion.
+Every figure is derived by hand in [NUMBERS.md](NUMBERS.md). The tests assert the fee days, the Day 5 and final closing balances, Auth-B's decline and the −425.00 behind it, and every criterion.
 
 ## Run it
 
 ```bash
 python3 replay.py                          # the per-day report
-python3 -m unittest tests.test_ledger -v   # 27 tests, all pass
+python3 -m unittest tests.test_ledger -v   # 31 tests, all pass
 python3 -m unittest tests.test_known_failure   # the one test that fails on purpose
 ```
 
@@ -139,7 +139,7 @@ ledger/money.py        minor units, half-even rate rounding, remainder-to-last s
 ledger/core.py         the ledger: event handlers, end-of-day close, restatement
 ledger/stream.py       the two accounts and the ten events, in replay order
 replay.py              runs the stream and prints the per-day report
-tests/test_ledger.py   every criterion tested for or against, invariants, edge cases (27 tests)
+tests/test_ledger.py   every criterion tested for or against, invariants, edge cases (31 tests)
 tools/make_figures.py  draws docs/img/*.svg: README charts replay the ledger; architecture figures are diagrams
 ```
 
