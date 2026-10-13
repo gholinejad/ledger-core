@@ -104,9 +104,9 @@ Each entry gives the ambiguity, how I resolved it, and what would change under t
     - a non-positive amount on a credit, debit or settlement;
     - a negative authorization. Zero is allowed: it is a card's account-verification check and holds nothing.
     - a credit split into fewer than one part, or into more parts than it has minor units (every instalment must be at least 1 fils);
-    - a missing value date;
+    - a missing value date on a credit, debit, settlement or reversal;
     - any event that arrives after Day 6 has been capitalised.
 
-    For well-typed events nothing raises out of `apply()`. A field of the wrong Python type, such as `value_day="1"`, still raises a TypeError, because type checking belongs to the parser that would build the events.
+    For well-typed events of realistic size nothing raises out of `apply()`. Size is not bounded: a credit split into, say, 2^62 instalments of an equally huge amount would exhaust memory, and a production parser would cap both. A field of the wrong Python type, such as `value_day="1"`, still raises a TypeError, because type checking belongs to the parser that would build the events.
     An event refused for its content (type, amount, parts, value date, authorization ID, reversal target) still advances the business day to its booked day, because its arrival is a fact about the stream. An event refused for its envelope (duplicate event ID, unknown account, booked day outside the window, window closed) does not move the day.
     An event refused because the window has closed is still kept as a notice in `ledger.notices`. No daily report prints it, because the last report was Day 6's.

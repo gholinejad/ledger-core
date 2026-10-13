@@ -175,7 +175,7 @@ class Ledger:
         if ev.booked_day < self.day:
             self._notice(ev.id, "WARNING",
                          f"late arrival: booked Day {ev.booked_day}, processed on Day {self.day}")
-        if ev.value_day is not None and ev.value_day < self.day:
+        if ev.type != "AUTHORIZATION" and ev.value_day < self.day:   # a hold has no value date on the ledger
             self._notice(ev.id, "INFO", f"back-valued to Day {ev.value_day}")
 
         handler = {

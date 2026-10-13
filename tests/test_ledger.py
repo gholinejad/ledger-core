@@ -95,6 +95,7 @@ class Invariants(unittest.TestCase):
     def test_headline_figures(self):
         ledger = run()
         self.assertEqual(ledger.reports[4]["accounts"][A1]["closing"], -41000)   # Day 5 close
+        self.assertEqual(ledger.reports[4]["accounts"][A2]["closing"], 0)        # E10 not yet arrived
         self.assertEqual(replay_until("E8").available(A1), -33500)            # Auth-B saw this
         self.assertIn("-425.00 AED", ledger.auth_state("Auth-B").reason)      # available after its hold
 
@@ -241,6 +242,19 @@ class EdgeCases(unittest.TestCase):
         self.assertTrue(errors(ledger, "P5") and errors(ledger, "PH"))
         ledger.apply(Event("P5", 1, "CREDIT", A1, 5, value_day=1, parts=5))          # corrected: 0.01 each
         self.assertEqual([e.amount for e in kinds(ledger, "CREDIT")][-5:], [1, 1, 1, 1, 1])
+
+    def test_a_finished_authorization_id_cannot_be_reused(self):
+        ledger = replay_until("E8")                                  # Auth-A SETTLED, Auth-B DECLINED
+        for i, auth in enumerate(("Auth-A", "Auth-B")):
+            ledger.apply(Event(f"D{i}", 5, "AUTHORIZATION", A2, 1, auth_id=auth))   # funds are irrelevant
+        self.assertTrue(errors(ledger, "D0") and errors(ledger, "D1"))
+        self.assertEqual((ledger.auth_state("Auth-A").state, ledger.auth_state("Auth-B").state), (SETTLED, DECLINED))
+
+    def test_a_content_refusal_still_advances_the_day(self):
+        ledger = replay_until("E2")                                  # still Day 1
+        ledger.apply(Event("BAD", 4, "TRANSFER", A1, 100, value_day=4))
+        self.assertTrue(errors(ledger, "BAD"))
+        self.assertEqual(ledger.day, 4)                              # Days 1-3 were closed on its arrival
 
     def test_duplicate_authorization_keeps_its_event_id(self):
         ledger = replay_until("E3")
