@@ -269,6 +269,17 @@ class EdgeCases(unittest.TestCase):
         self.assertIn("INFO", levels("BS"))
         self.assertIn("INFO", levels("BR"))
 
+    def test_an_authorization_ignores_its_value_date(self):
+        ledger = replay_until("E2")
+        ledger.apply(Event("AT", 1, "AUTHORIZATION", A1, 100, value_day="1", auth_id="Auth-T"))
+        self.assertEqual(ledger.auth_state("Auth-T").state, APPROVED)
+
+    def test_a_duplicate_auth_id_refusal_still_advances_the_day(self):
+        ledger = replay_until("E3")                                  # Day 2, Auth-A exists
+        ledger.apply(Event("DA", 3, "AUTHORIZATION", A1, 100, auth_id="Auth-A"))
+        self.assertTrue(errors(ledger, "DA"))
+        self.assertEqual(ledger.day, 3)
+
     def test_authorization_without_an_id_is_refused(self):
         ledger = replay_until("E2")
         ledger.apply(Event("NA", 1, "AUTHORIZATION", A1, 100))

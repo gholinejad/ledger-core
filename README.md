@@ -25,7 +25,7 @@ Every figure is derived by hand in [NUMBERS.md](NUMBERS.md). The tests assert th
 
 ```bash
 python3 replay.py                          # the per-day report
-python3 -m unittest tests.test_ledger -v   # 35 tests, all pass
+python3 -m unittest tests.test_ledger -v   # 37 tests, all pass
 python3 -m unittest tests.test_known_failure   # the one test that fails on purpose
 ```
 
@@ -139,7 +139,7 @@ ledger/money.py        minor units, half-even rate rounding, remainder-to-last s
 ledger/core.py         the ledger: event handlers, end-of-day close, restatement
 ledger/stream.py       the two accounts and the ten events, in replay order
 replay.py              runs the stream and prints the per-day report
-tests/test_ledger.py   every criterion tested for or against, invariants, edge cases (35 tests)
+tests/test_ledger.py   every criterion tested for or against, invariants, edge cases (37 tests)
 tools/make_figures.py  draws docs/img/*.svg: README charts replay the ledger; architecture figures are diagrams
 ```
 

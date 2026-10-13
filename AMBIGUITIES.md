@@ -108,6 +108,6 @@ Each entry gives the ambiguity, how I resolved it, and what would change under t
     - any event that arrives after Day 6 has been capitalised.
 
     For well-typed events of realistic size nothing raises out of `apply()`. Size is not bounded: a credit split into, say, 2^62 instalments of an equally huge amount would exhaust memory, and a production parser would cap both.
-    Python types are not validated. A wrong type on a money event either raises (`value_day="1"` on a debit) or is posted as given (a float amount), and an authorization ignores its value date entirely. Type checking belongs to the parser that would build the events.
+    Python types are not validated, so what happens to a wrongly typed field is unspecified: it may raise, be posted, or be refused by a check it fails to match. An authorization ignores its value date entirely. Type checking belongs to the parser that would build the events.
     An event refused for its content (type, amount, parts, value date, authorization ID, reversal target) still advances the business day to its booked day, because its arrival is a fact about the stream. An event refused for its envelope (duplicate event ID, unknown account, booked day outside the window, window closed) does not move the day.
     An event refused because the window has closed is still kept as a notice in `ledger.notices`. No daily report prints it, because the last report was Day 6's.
