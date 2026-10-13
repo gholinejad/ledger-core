@@ -141,6 +141,7 @@ ledger/stream.py       the two accounts and the ten events, in replay order
 replay.py              runs the stream and prints the per-day report
 tests/test_ledger.py   every criterion tested for or against, invariants, edge cases (37 tests)
 tools/make_figures.py  draws docs/img/*.svg: README charts replay the ledger; architecture figures are diagrams
+tools/other_reading.py reproduces the figures for the other fee reading in AMBIGUITIES #3
 ```
 
 ## How changes are made

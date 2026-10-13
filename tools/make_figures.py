@@ -148,6 +148,7 @@ def _ledger_views():
         processed.setdefault(tr.source, tr.booked_day)
     return {
         "STREAM": STREAM, "DAY5": day5, "PROCESSED": processed,
+        "FORCE_POSTED": {e.event for e in final.entries if e.kind == "FORCE_POST"},
         "PRINTED": [final.reports[d - 1]["accounts"][A1]["closing"] for d in range(1, 7)],
         "TRUTH": [final.balance(A1, d) for d in range(1, 7)],
         "VIEW5": [day5.balance(A1, d) for d in range(1, 6)],
@@ -187,7 +188,8 @@ def timeline():
         c, cs = (RED, REDS) if late else (WARN, WARNS) if back else (DEV, DEVS) if hold else (ACC, ACCS)
         b += rect(cx - 25, cy - 13, 50, 26, cs, c, 1.6) + t(cx, cy + 4, ev.id, 12, c, 800, "middle")
         tag = {"CREDIT": "credit", "DEBIT": "debit", "AUTHORIZATION": "auth", "SETTLEMENT": "settle", "REVERSAL": "reverse"}[ev.type]
-        tag = "force-post" if ev.type == "SETTLEMENT" and ev.auth_id == "Auth-Z" else tag
+        if ev.id in v["FORCE_POSTED"]:
+            tag = "force-post"
         b += t(cx, cy + 27, tag + (" (late)" if late else ""), 9.5, c, 600, "middle")
         if hold:
             b += line(cx, cy + 33, cx, cy + 46, DEV, 1.2, "3 3") + t(cx, cy + 58, "not on ledger", 9, DEV, 600, "middle")

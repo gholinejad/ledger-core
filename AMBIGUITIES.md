@@ -20,7 +20,7 @@ Each entry gives the ambiguity, how I resolved it, and what would change under t
    - Nothing is refunded after E9.
    - Day 6 closes at 260.67, with 0.67 interest.
 
-   I rejected it for three reasons. It leaves Days 2 and 4 negative on the ledger with no fee. It keeps a Day 5 fee after E9 has made Day 5 positive. And it pays interest computed on balances the ledger no longer shows. I computed these figures by running the core with re-testing switched off.
+   I rejected it for three reasons. It leaves Days 2 and 4 negative on the ledger with no fee. It keeps a Day 5 fee after E9 has made Day 5 positive. And it pays interest computed on balances the ledger no longer shows. These figures come from `python3 tools/other_reading.py`, which runs the same core with a close that tests and accrues only its own day. If earlier accruals were still restated, Day 6 would be 260.77 with 0.77 interest, so both halves of the reading matter.
    **Other reading 3:** "value_date equal to the day assessed" means the day the close runs, so all three fees would be dated Day 5. That puts three fees on one day, which breaks "once per day per account".
 
 4. **Which balance the fee test reads.**
