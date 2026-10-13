@@ -167,7 +167,7 @@ def aed(m, sign=False):
 def timeline():
     v = _ledger_views()
     STREAM, proc = v["STREAM"], v["PROCESSED"]
-    W, H, L0, R0 = 840, 300, 92, 20
+    W, H, L0, R0 = 840, 322, 92, 20
     X = lambda d: L0 + (d - 0.5) * (W - L0 - R0) / 6
     ay, vy = 76, 262
     b = t(12, ay - 30, "arrives", 12, INK, 700) + t(12, ay - 15, "(stream order)", 10, MUTED)
@@ -187,6 +187,7 @@ def timeline():
         c, cs = (RED, REDS) if late else (WARN, WARNS) if back else (DEV, DEVS) if hold else (ACC, ACCS)
         b += rect(cx - 25, cy - 13, 50, 26, cs, c, 1.6) + t(cx, cy + 4, ev.id, 12, c, 800, "middle")
         tag = {"CREDIT": "credit", "DEBIT": "debit", "AUTHORIZATION": "auth", "SETTLEMENT": "settle", "REVERSAL": "reverse"}[ev.type]
+        tag = "force-post" if ev.type == "SETTLEMENT" and ev.auth_id == "Auth-Z" else tag
         b += t(cx, cy + 27, tag + (" (late)" if late else ""), 9.5, c, 600, "middle")
         if hold:
             b += line(cx, cy + 33, cx, cy + 46, DEV, 1.2, "3 3") + t(cx, cy + 58, "not on ledger", 9, DEV, 600, "middle")
@@ -197,6 +198,8 @@ def timeline():
             off = 18 if ev.type == "REVERSAL" else -6      # E7 and E9 both land on Day 2: keep their heads apart
             b += curve(f"M{cx:.1f} {cy + 33:.1f} C {cx:.1f} {vy - 40}, {vx + 30:.1f} {vy - 70}, {vx + off:.1f} {vy - 5}", c, 2)
     b += t(W - R0, 22, "E7 and E9 land three and four days back; E10 is booked Day 5 but arrives after E9", 11, RED, 600, "end")
+    for i, (lab, c, cs) in enumerate((("on time", ACC, ACCS), ("back-valued", WARN, WARNS), ("late", RED, REDS), ("authorization, not on ledger", DEV, DEVS))):
+        b += rect(L0 + i * 130, H - 16, 14, 12, cs, c, 1.4, 3) + t(L0 + 20 + i * 130, H - 6, lab, 10.5, INK2, 600)
     return svg(W, H, b, "When each event arrives and which day it lands on")
 
 
@@ -232,7 +235,7 @@ def three_views():
     b += line(lx, ly - 4, lx + 26, ly - 4, ACC, 3.4) + t(lx + 32, ly, "final, as known after Day 6", 12, INK, 600)
     b += line(lx + 220, ly - 4, lx + 246, ly - 4, RED, 3) + t(lx + 252, ly, "as the Day 5 close saw it (after E7)", 12, INK, 600)
     b += line(lx + 500, ly - 4, lx + 526, ly - 4, OLD, 2, "5 5") + t(lx + 532, ly, "printed each evening", 12, INK, 600)
-    b += t(W - R0, H - 2, "ACC-001, AED. The printed line equals the final one on Days 1-4.", 10.5, MUTED, 400, "end")
+    b += t(W - R0, H - 2, "ACC-001, AED. The printed line equals the final one on every day except Day 5.", 10.5, MUTED, 400, "end")
     b += rect(lx, ly + 10, 26, 11, REDS, rx=2) + t(lx + 32, ly + 20, "below zero: an overdraft fee is owed for that day", 11.5, RED, 600)
     return svg(W, H, b, "ACC-001 closing balance by day, three views")
 
@@ -258,7 +261,7 @@ def day5_bridge():
         b += line(L0, Y(v), W - R0, Y(v), RULE, 1) + t(L0 - 8, Y(v) + 4, aed(v).replace(".00", ""), 10.5, MUTED, 400, "end")
     b += line(L0, Y(0), W - R0, Y(0), INK2, 1.6)
     b += t(W - R0, 14, "fee bars: 'test' is that day's balance before its own fee; a fee is owed when it is negative.", 10.5, MUTED, 400, "end")
-    b += t(W - R0, 28, f"Day 3 tests at +{aed(VIEW5[2])}, so it gets no fee.", 10.5, MUTED, 400, "end")
+    b += t(W - R0, 28, f"Day 3 tests at +{aed(VIEW5[2])}, so it gets no fee. ACC-001, AED, as the Day 5 close saw it.", 10.5, MUTED, 400, "end")
 
     def bar(i, a, z, colour, top, sub, val, strong=False):
         x = L0 + i * bw + bw * 0.14

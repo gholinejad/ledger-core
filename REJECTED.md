@@ -26,6 +26,8 @@ E7 does not touch only Day 2. It is dated Day 2, so it lowers the closing balanc
 
 E7 causes **three** fees (Days 2, 4 and 5), assessed at the Day 5 close. Without the force-posted E6, Day 4 would be −180.00 and still three fees. The criterion counts only the day the entry is dated, not the days it carries forward into. Test: `test_c2_e7_causes_three_fees_not_one`.
 
+**It is wrong under the other reading too.** Suppose a closed day is never re-tested, so each close tests only its own day (AMBIGUITIES #3). Then E7 causes exactly one fee, but it is dated **Day 5**, not Day 2: Day 5 closes at −360.00, and Day 6 at 260.67 with 0.67 interest. There is no reading under which the criterion holds.
+
 ### Criterion 4: "Any settlement referencing an authorization ID not present in the ledger must be rejected and the funds must not leave the account"
 
 The criterion is wrong for three reasons.
@@ -56,6 +58,8 @@ Test: `test_c6_after_e9_net_balances_return_but_history_and_auth_do_not`.
 This contradicts a non-negotiable rule, which says the rounded daily accruals must sum **exactly** to the capitalised total. Discarding a remainder is the very mismatch that rule forbids, and it would also be an unexplained gain or loss in the books. In this design the capitalised amount is defined as the sum of the accrual records, so a remainder cannot exist: ACC-001 is 0.79 and ACC-002 is 0.008. Test: `test_c8_daily_accruals_sum_exactly_to_capitalised`.
 
 ## Part B: approaches abandoned mid-build
+
+Both were abandoned while the core was being written, before its first commit (`d7475a7`). The commit history therefore does not show them, and this section is their only record.
 
 1. **Reversal tracking through a side index.** The first version kept a dictionary of "event → events that reversed it" outside the entry log. I replaced it with a `reverses` field on the REVERSAL entry itself. Keeping the fact in a second structure meant two sources of truth, and the side index was mutable state inside an append-only design.
 
