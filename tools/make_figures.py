@@ -3,7 +3,7 @@
     python3 tools/make_figures.py
 
 Standard library only. The architecture figures are diagrams of the design; none of them restates the
-event stream.
+event stream. The README figures replay the ledger, so every number on them comes from the code.
 """
 import os
 from html import escape
@@ -123,7 +123,167 @@ def auth_lifecycle():
     return svg(W, H, b, "Authorization lifecycle")
 
 
-FIGURES = {"close-cost": close_cost, "backvalue-gate": backvalue_gate, "auth-lifecycle": auth_lifecycle}
+# -- README figures: these replay the stream, so every number on them comes from the ledger ----------------------
+def _ledger_views():
+    import sys
+    sys.path.insert(0, ROOT)
+    from ledger.core import Ledger
+    from ledger.stream import ACCOUNTS, STREAM
+    from replay import run
+
+    def replay_until(event_id):
+        led = Ledger(ACCOUNTS)
+        for ev in STREAM:
+            led.apply(ev)
+            if ev.id == event_id:
+                return led
+        raise KeyError(event_id)
+    final, day5 = run(), replay_until("E8")
+    day5.close_day()
+    return {
+        "STREAM": STREAM, "DAY5": day5,
+        "PRINTED": [final.reports[d - 1]["accounts"][A1]["closing"] for d in range(1, 7)],
+        "TRUTH": [final.balance(A1, d) for d in range(1, 7)],
+        "VIEW5": [day5.balance(A1, d) for d in range(1, 6)],
+        "PRE5": [day5.balance(A1, d, exclude_fee_day=d) for d in range(1, 6)],
+    }
+
+
+A1 = "ACC-001"
+VIO, DEVS = "#6a4c93", "#e3f3f1"
+DEV = "#0f766e"
+
+
+def aed(m, sign=False):
+    return ("−" if m < 0 else ("+" if sign and m > 0 else "")) + f"{abs(m) / 100:,.2f}"
+
+
+def curve_(d, c, w=2):
+    return f"<path d='{d}' stroke='{c}' stroke-width='{w}' fill='none' marker-end='url(#a{c[1:]})'/>"
+
+
+def timeline():
+    v = _ledger_views()
+    STREAM = v["STREAM"]
+    W, H, L0, R0 = 840, 300, 92, 20
+    X = lambda d: L0 + (d - 0.5) * (W - L0 - R0) / 6
+    ay, vy = 76, 262
+    b = t(12, ay - 30, "arrives", 12, INK, 700) + t(12, ay - 15, "(stream order)", 10, MUTED)
+    b += t(12, vy + 4, "lands on", 12, INK, 700) + t(12, vy + 19, "(value date)", 10, MUTED)
+    for d in range(1, 7):
+        b += t(X(d), ay - 28, f"Day {d}", 12, INK2, 700, "middle")
+        b += line(X(d) - 52, vy, X(d) + 52, vy, INK2, 2) + t(X(d), vy + 20, f"Day {d}", 11, MUTED, 600, "middle")
+    proc, day, seen = {}, 1, {}
+    for ev in STREAM:                              # processing day = stream position, not booked day
+        day = max(day, ev.booked_day)
+        proc[ev.id] = day
+    for ev in STREAM:
+        d = proc[ev.id]
+        k = seen.get(d, 0)
+        seen[d] = k + 1
+        multi = sum(1 for v in proc.values() if v == d) > 1
+        cx, cy = (X(d) + (k - 0.5) * 56) if multi else X(d), ay + 6
+        late, hold = ev.booked_day < d, ev.type == "AUTHORIZATION"
+        back = ev.value_day is not None and ev.value_day < d
+        c, cs = (RED, REDS) if late else (WARN, WARNS) if back else (DEV, DEVS) if hold else (ACC, ACCS)
+        b += rect(cx - 25, cy - 13, 50, 26, cs, c, 1.6) + t(cx, cy + 4, ev.id, 12, c, 800, "middle")
+        tag = {"CREDIT": "credit", "DEBIT": "debit", "AUTHORIZATION": "hold", "SETTLEMENT": "settle", "REVERSAL": "reverse"}[ev.type]
+        b += t(cx, cy + 27, tag + (" (late)" if late else ""), 9.5, c, 600, "middle")
+        if hold:
+            b += line(cx, cy + 33, cx, cy + 46, DEV, 1.2, "3 3") + t(cx, cy + 58, "not on ledger", 9, DEV, 600, "middle")
+        elif ev.value_day == d:
+            b += line(cx, cy + 33, cx, vy - 4, c, 1.4, arrow=True)
+        else:
+            vx = X(ev.value_day)
+            b += curve_(f"M{cx:.1f} {cy + 33:.1f} C {cx:.1f} {vy - 40}, {vx + 30:.1f} {vy - 70}, {vx + 6:.1f} {vy - 5}", c)
+    b += t(W - R0, 22, "E7 and E9 land three and four days back; E10 is booked Day 5 but arrives after E9", 11, RED, 600, "end")
+    return svg(W, H, b, "When each event arrives and which day it lands on")
+
+
+def three_views():
+    v = _ledger_views()
+    PRINTED, TRUTH, VIEW5 = v["PRINTED"], v["TRUTH"], v["VIEW5"]
+    W, H, L0, R0, T0, B0 = 820, 440, 70, 30, 62, 46
+    lo, hi = -50000, 75000
+    X = lambda d: L0 + (d - 1) * (W - L0 - R0) / 5
+    Y = lambda v: T0 + (hi - v) * (H - T0 - B0) / (hi - lo)
+    b = rect(L0, Y(0), W - L0 - R0, Y(lo) - Y(0), REDS, rx=0)
+    for v in range(lo, hi + 1, 25000):
+        b += line(L0, Y(v), W - R0, Y(v), RULE, 1) + t(L0 - 10, Y(v) + 4, aed(v).replace(".00", ""), 11, MUTED, 400, "end")
+    b += line(L0, Y(0), W - R0, Y(0), INK2, 1.6)
+    for d in range(1, 7):
+        b += t(X(d), H - 18, f"Day {d}", 12, INK2, 600, "middle")
+    pts = lambda vals: " ".join(f"{X(d):.1f},{Y(v):.1f}" for d, v in zip(range(1, 7), vals))
+    b += f"<polyline points='{pts(PRINTED)}' fill='none' stroke='{OLD}' stroke-width='2' stroke-dasharray='5 5'/>"
+    b += f"<polyline points='{pts(VIEW5)}' fill='none' stroke='{RED}' stroke-width='3'/>"
+    b += f"<polyline points='{pts(TRUTH)}' fill='none' stroke='{ACC}' stroke-width='3.4'/>"
+    for d, v in zip(range(1, 6), VIEW5):
+        b += f"<circle cx='{X(d):.1f}' cy='{Y(v):.1f}' r='5' fill='{RED}'/>"
+    for d, v in zip(range(1, 7), TRUTH):
+        b += f"<circle cx='{X(d):.1f}' cy='{Y(v):.1f}' r='5' fill='{ACC}' stroke='#fff' stroke-width='1.5'/>"
+    b += t(X(2) + 8, Y(VIEW5[1]) + 18, aed(VIEW5[1]), 12, RED, 700)
+    b += t(X(3) + 8, Y(VIEW5[2]) + 22, f"+{aed(VIEW5[2])}: positive, no fee", 12, RED, 700)
+    b += t(X(4) + 8, Y(VIEW5[3]) + 18, aed(VIEW5[3]), 12, RED, 700)
+    b += t(X(5), Y(VIEW5[4]) + 24, aed(VIEW5[4]), 13, RED, 800, "middle")
+    b += t(X(1) + 6, Y(TRUTH[0]) - 12, aed(TRUTH[0]), 12, ACC, 700)
+    b += t(X(3), Y(TRUTH[2]) - 12, aed(TRUTH[2]), 12, ACC, 700, "middle")
+    b += t(X(6) - 6, Y(TRUTH[5]) - 12, aed(TRUTH[5]), 13, ACC, 800, "end")
+    lx, ly = L0 + 6, 22
+    b += line(lx, ly - 4, lx + 26, ly - 4, ACC, 3.4) + t(lx + 32, ly, "final, as known after Day 6", 12, INK, 600)
+    b += line(lx + 220, ly - 4, lx + 246, ly - 4, RED, 3) + t(lx + 252, ly, "as the Day 5 close saw it (after E7)", 12, INK, 600)
+    b += line(lx + 500, ly - 4, lx + 526, ly - 4, OLD, 2, "5 5") + t(lx + 532, ly, "printed each evening", 12, INK, 600)
+    b += rect(lx, ly + 10, 26, 11, REDS, rx=2) + t(lx + 32, ly + 20, "below zero: an overdraft fee is owed for that day", 11.5, RED, 600)
+    return svg(W, H, b, "ACC-001 closing balance by day, three views")
+
+
+def day5_bridge():
+    v = _ledger_views()
+    DAY5, VIEW5, PRE5 = v["DAY5"], v["VIEW5"], v["PRE5"]
+    W, H, L0, R0, T0, B0 = 840, 330, 64, 16, 26, 74
+    lo, hi = -50000, 75000
+    steps = []
+    for d in range(2, 6):
+        for e in sorted((e for e in DAY5.entries if e.account == A1 and e.value_day == d), key=lambda e: (e.kind == "FEE", e.seq)):
+            if e.kind == "FEE":
+                steps.append(("fee", f"test {aed(PRE5[d - 1])}", e.amount, WARN, d))
+            else:
+                kind = {"DEBIT": "debit", "CREDIT": "credit", "SETTLEMENT": "settle A", "FORCE_POST": "force-post Z"}[e.kind]
+                steps.append((e.source, kind, e.amount, OK if e.amount > 0 else RED, d))
+    n = len(steps) + 2
+    bw = (W - L0 - R0) / n
+    Y = lambda v: T0 + (hi - v) * (H - T0 - B0) / (hi - lo)
+    b = ""
+    for v in range(lo, hi + 1, 25000):
+        b += line(L0, Y(v), W - R0, Y(v), RULE, 1) + t(L0 - 8, Y(v) + 4, aed(v).replace(".00", ""), 10.5, MUTED, 400, "end")
+    b += line(L0, Y(0), W - R0, Y(0), INK2, 1.6)
+
+    def bar(i, a, z, colour, top, sub, val, strong=False):
+        x = L0 + i * bw + bw * 0.14
+        y1, y2 = Y(max(a, z)), Y(min(a, z))
+        out = rect(x, y1, bw * 0.72, max(y2 - y1, 2.5), colour, rx=3)
+        out += t(x + bw * 0.36, y1 - 6 if z >= a else y2 + 15, val, 12 if strong else 11, INK if strong else colour, 800 if strong else 700, "middle")
+        out += t(x + bw * 0.36, H - B0 + 18, top, 11, INK, 700, "middle") + t(x + bw * 0.36, H - B0 + 33, sub, 10, MUTED, 400, "middle")
+        return out
+    total = VIEW5[0]
+    b += bar(0, 0, total, ACC, "Day 1", "closing", aed(total), True)
+    prev = None
+    for i, (lab, sub, delta, colour, day) in enumerate(steps, start=1):
+        if day != prev:
+            x = L0 + i * bw
+            b += line(x, T0 - 6, x, H - B0 + 40, RULE, 1, "3 3") + t(x + 4, H - 8, f"value Day {day}", 10.5, ACC, 700)
+            prev = day
+        b += bar(i, total, total + delta, colour, lab, sub, aed(delta, True))
+        b += line(L0 + i * bw + bw * 0.86, Y(total + delta), L0 + (i + 1) * bw + bw * 0.14, Y(total + delta), MUTED, 1, "2 2")
+        total += delta
+    assert total == VIEW5[4]
+    b += bar(n - 1, 0, total, RED, "Day 5", "closing", aed(total), True)
+    return svg(W, H, b, "Bridge from Day 1 closing to Day 5 closing at the Day 5 close")
+
+
+
+
+FIGURES = {"close-cost": close_cost, "backvalue-gate": backvalue_gate, "auth-lifecycle": auth_lifecycle,
+           "timeline": timeline, "three-views": three_views, "day5-bridge": day5_bridge}
 
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
