@@ -74,7 +74,7 @@ def close_cost():
 
 def backvalue_gate():
     """The one control before go-live, in the order its checks run."""
-    W, H = 760, 176
+    W, H = 850, 176
     b = ""
     y0, h = 40, 56
     boxes = [(8, 120, "entry arrives", "", SOFT, INK2),
@@ -93,9 +93,10 @@ def backvalue_gate():
     b += line(218, y0 + h, 218, 128, OK, 1.4, arrow=True) + t(226, 122, "no: post normally", 10.5, OK, 600)
     b += line(378, y0 + h, 378, 150, RED, 1.4, arrow=True) + t(386, 146, "yes: refuse; post today with a reference", 10.5, RED, 600)
     b += line(530, y0 + h, 530, 128, OK, 1.4, arrow=True) + t(538, 122, "yes: post, exempt", 10.5, OK, 600)
-    b += line(683, y0 + h, 683, 150, WARN, 1.4, arrow=True)
-    b += t(752, 166, "approved: post + daily report to Finance and Compliance", 10.5, WARN, 600, "end")
-    b += t(8, 22, "Checks run left to right; fee reversals and accrual deltas are system compensations", 11, MUTED)
+    b += line(650, y0 + h, 650, 150, WARN, 1.4, arrow=True)
+    b += t(642, 166, "approved: post + daily report to Finance and Compliance", 10.5, WARN, 600, "end")
+    b += line(730, y0 + h, 730, 128, RED, 1.4, arrow=True) + t(738, 122, "not approved:", 10.5, RED, 600) + t(738, 136, "refuse", 10.5, RED, 600)
+    b += t(8, 22, "Checks run left to right; system compensations are the fees, fee reversals and interest the close posts", 11, MUTED)
     return svg(W, H, b, "Back-valuation gate with maker-checker")
 
 
