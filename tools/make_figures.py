@@ -181,7 +181,7 @@ def timeline():
         d = proc[ev.id]
         k = seen.get(d, 0)
         seen[d] = k + 1
-        multi = sum(1 for v in proc.values() if v == d) > 1
+        multi = sum(1 for day in proc.values() if day == d) > 1
         cx, cy = (X(d) + (k - 0.5) * 56) if multi else X(d), ay + 6
         late, hold = ev.booked_day < d, ev.type == "AUTHORIZATION"
         back = ev.value_day is not None and ev.value_day < d

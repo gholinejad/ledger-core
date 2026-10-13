@@ -1,7 +1,8 @@
 """Reproduce AMBIGUITIES #3, other reading 2: a closed day is never re-tested.
 
 Each end-of-day close tests the fee and accrues interest for its own day only,
-then capitalises at the end of Day 6 as usual. Nothing earlier is restated.
+then capitalises at the end of Day 6 as usual. No fee or accrual of an earlier day is restated
+(the inherited report still prints the restated balances that back-valued entries cause).
 
     python3 tools/other_reading.py
 """
