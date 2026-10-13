@@ -159,7 +159,7 @@ class Ledger:
         if ev.account not in self.ccy:
             self._notice(ev.id, "ERROR", f"unknown account {ev.account}, ignored")
             return
-        if ev.booked_day > LAST_DAY:
+        if not FIRST_DAY <= ev.booked_day <= LAST_DAY:
             self._notice(ev.id, "ERROR", f"booked Day {ev.booked_day} is outside the window, ignored")
             return
         if self.day > LAST_DAY:
@@ -175,7 +175,7 @@ class Ledger:
         if ev.booked_day < self.day:
             self._notice(ev.id, "WARNING",
                          f"late arrival: booked Day {ev.booked_day}, processed on Day {self.day}")
-        if ev.value_day is not None and ev.value_day < self.day:
+        if ev.type != "AUTHORIZATION" and ev.value_day < self.day:   # a hold has no value date on the ledger
             self._notice(ev.id, "INFO", f"back-valued to Day {ev.value_day}")
 
         handler = {
@@ -190,14 +190,20 @@ class Ledger:
             return f"unknown event type {ev.type}"
         if ev.type == "AUTHORIZATION":
             # zero is allowed: a card's account-verification check holds nothing
-            return "amount must not be negative" if ev.amount < 0 else None
+            if ev.amount < 0:
+                return "amount must not be negative"
+            if not ev.auth_id:
+                return "authorization ID missing"
+            if self.auth_state(ev.auth_id) is not None:
+                return f"{ev.auth_id} already exists"
+            return None
         if ev.type == "REVERSAL":
             if ev.amount != 0:
                 return "a reversal is always full and carries no amount (partial reversals are not supported)"
         elif ev.amount <= 0:
             return "amount must be positive"
-        if ev.type == "CREDIT" and ev.parts < 1:
-            return "parts must be at least 1"
+        if ev.type == "CREDIT" and not 1 <= ev.parts <= ev.amount:
+            return "parts must be between 1 and the amount in minor units (every instalment at least one unit)"
         if ev.value_day is None:
             return "value date missing"
         if not FIRST_DAY <= ev.value_day <= self.day:
@@ -231,9 +237,6 @@ class Ledger:
         self._post(ev.account, "DEBIT", -ev.amount, ev.value_day, ev.id, event=ev.id)
 
     def _authorize(self, ev: Event) -> None:
-        if self.auth_state(ev.auth_id) is not None:
-            self._notice(ev.id, "ERROR", f"{ev.auth_id} already exists, ignored")
-            return
         after = self.available(ev.account) - ev.amount
         ccy = self.ccy[ev.account]
         if after >= 0:

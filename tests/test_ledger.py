@@ -92,6 +92,13 @@ def ledger_entries(ledger, account, kind):
 
 
 class Invariants(unittest.TestCase):
+    def test_headline_figures(self):
+        ledger = run()
+        self.assertEqual(ledger.reports[4]["accounts"][A1]["closing"], -41000)   # Day 5 close
+        self.assertEqual(ledger.reports[4]["accounts"][A2]["closing"], 0)        # E10 not yet arrived
+        self.assertEqual(replay_until("E8").available(A1), -33500)            # Auth-B saw this
+        self.assertIn("-425.00 AED", ledger.auth_state("Auth-B").reason)      # available after its hold
+
     def test_final_closing_balances(self):
         ledger = run()
         self.assertEqual(ledger.reports[-1]["accounts"][A1]["closing"], 28579)
@@ -186,13 +193,15 @@ class EdgeCases(unittest.TestCase):
 
     def test_invalid_events_are_errors_and_keep_their_id(self):
         ledger = replay_until("E2")
-        for bad in (Event("X", 1, "DEBIT", A1, 100, value_day=3),       # future value date
-                    Event("X", 1, "DEBIT", A1, 100, value_day=0),       # before the window
+        for bad in (Event("X", 1, "DEBIT", A1, 100, value_day=2),       # value date tomorrow
+                    Event("X", 1, "CREDIT", A1, 100, value_day=0),      # before the window
+                    Event("X", 1, "SETTLEMENT", A1, 100, value_day=2, auth_id="Auth-Q"),
+                    Event("X", 1, "REVERSAL", A1, value_day=2, target="E2"),
                     Event("X", 1, "TRANSFER", A1, 100, value_day=1),    # unknown type
                     Event("X", 1, "DEBIT", A1, -100, value_day=1),      # negative amount
                     Event("X", 1, "REVERSAL", A1, target="E2")):        # no value date
             ledger.apply(bad)
-        self.assertEqual(len(errors(ledger, "X")), 5)
+        self.assertEqual(len(errors(ledger, "X")), 7)
         ledger.apply(Event("X", 1, "DEBIT", A1, 100, value_day=1))     # the corrected retry
         self.assertEqual(ledger.balance(A1, 1), 24900)
 
@@ -218,6 +227,83 @@ class EdgeCases(unittest.TestCase):
         self.assertIn("always full", errors(ledger, "RP")[0])
         self.assertIn("itself a reversal", errors(ledger, "RR")[0])
         self.assertEqual([e.amount for e in kinds(ledger, "REVERSAL")], [62000])
+
+    def test_booked_day_outside_the_window_is_refused(self):
+        ledger = Ledger(ACCOUNTS)
+        ledger.apply(Event("B0", 0, "CREDIT", A1, 100, value_day=1))
+        ledger.apply(Event("B7", 7, "CREDIT", A1, 100, value_day=1))
+        self.assertTrue(errors(ledger, "B0") and errors(ledger, "B7"))
+        self.assertEqual((ledger.entries, ledger.day), ([], 1))   # nothing posted, no day closed
+        ledger.apply(Event("B0", 1, "CREDIT", A1, 100, value_day=1))   # corrected retry, same id
+        self.assertEqual(ledger.balance(A1, 1), 100)
+
+    def test_parts_cannot_exceed_the_amount(self):
+        ledger = replay_until("E2")
+        ledger.apply(Event("P3", 1, "CREDIT", A1, 2, value_day=1, parts=3))          # boundary: one part too many
+        ledger.apply(Event("P5", 1, "CREDIT", A1, 2, value_day=1, parts=5))          # 0.02 in five parts
+        ledger.apply(Event("PH", 1, "CREDIT", A1, 100, value_day=1, parts=2 ** 62))  # would exhaust memory
+        self.assertTrue(errors(ledger, "P3") and errors(ledger, "P5") and errors(ledger, "PH"))
+        ledger.apply(Event("P5", 1, "CREDIT", A1, 5, value_day=1, parts=5))          # corrected: 0.01 each
+        self.assertEqual([e.amount for e in kinds(ledger, "CREDIT")][-5:], [1, 1, 1, 1, 1])
+
+    def test_a_finished_authorization_id_cannot_be_reused(self):
+        ledger = replay_until("E8")                                  # Auth-A SETTLED, Auth-B DECLINED
+        for i, auth in enumerate(("Auth-A", "Auth-B")):
+            ledger.apply(Event(f"D{i}", 5, "AUTHORIZATION", A2, 1, auth_id=auth))   # funds are irrelevant
+        self.assertTrue(errors(ledger, "D0") and errors(ledger, "D1"))
+        self.assertEqual((ledger.auth_state("Auth-A").state, ledger.auth_state("Auth-B").state), (SETTLED, DECLINED))
+
+    def test_back_valued_note_is_for_money_events_only(self):
+        ledger = replay_until("E2")
+        ledger.apply(Event("C3", 3, "CREDIT", A1, 100, value_day=3))                  # now on Day 3
+        ledger.apply(Event("LA", 2, "AUTHORIZATION", A1, 100, value_day=2, auth_id="Auth-L"))
+        ledger.apply(Event("LD", 2, "DEBIT", A1, 100, value_day=2))
+        levels = lambda src: sorted(n.level for n in ledger.notices if n.source == src)
+        ledger.apply(Event("BC", 3, "CREDIT", A1, 100, value_day=1))                  # on time, back-valued
+        ledger.apply(Event("TC", 3, "CREDIT", A1, 100, value_day=3))                  # on time, today
+        ledger.apply(Event("BS", 3, "SETTLEMENT", A1, 100, value_day=1, auth_id="Auth-Q"))
+        ledger.apply(Event("BR", 3, "REVERSAL", A1, value_day=1, target="BC"))
+        self.assertEqual(levels("LA"), ["WARNING"])                 # late, but a hold has no value date
+        self.assertEqual(levels("LD"), ["INFO", "WARNING"])         # late and back-valued
+        self.assertEqual((levels("BC"), levels("TC")), (["INFO"], []))
+        self.assertIn("INFO", levels("BS"))
+        self.assertIn("INFO", levels("BR"))
+
+    def test_an_authorization_ignores_its_value_date(self):
+        ledger = replay_until("E2")
+        ledger.apply(Event("AT", 1, "AUTHORIZATION", A1, 100, value_day="1", auth_id="Auth-T"))
+        self.assertEqual(ledger.auth_state("Auth-T").state, APPROVED)
+
+    def test_a_duplicate_auth_id_refusal_still_advances_the_day(self):
+        ledger = replay_until("E3")                                  # Day 2, Auth-A exists
+        ledger.apply(Event("DA", 3, "AUTHORIZATION", A1, 100, auth_id="Auth-A"))
+        self.assertTrue(errors(ledger, "DA"))
+        self.assertEqual(ledger.day, 3)
+
+    def test_authorization_without_an_id_is_refused(self):
+        ledger = replay_until("E2")
+        ledger.apply(Event("NA", 1, "AUTHORIZATION", A1, 100))
+        ledger.apply(Event("NE", 3, "AUTHORIZATION", A1, 100, auth_id=""))
+        self.assertEqual(ledger.day, 3)                              # a content refusal still advances the day
+        self.assertTrue(errors(ledger, "NA") and errors(ledger, "NE"))
+        self.assertIsNone(ledger.auth_state(None))
+        self.assertIsNone(ledger.auth_state(""))
+        ledger.apply(Event("NA", 3, "AUTHORIZATION", A1, 100, auth_id="Auth-N"))   # corrected retry, same id
+        self.assertEqual(ledger.auth_state("Auth-N").state, APPROVED)
+
+    def test_a_content_refusal_still_advances_the_day(self):
+        ledger = replay_until("E2")                                  # still Day 1
+        ledger.apply(Event("BAD", 4, "TRANSFER", A1, 100, value_day=4))
+        self.assertTrue(errors(ledger, "BAD"))
+        self.assertEqual(ledger.day, 4)                              # Days 1-3 were closed on its arrival
+
+    def test_duplicate_authorization_keeps_its_event_id(self):
+        ledger = replay_until("E3")
+        ledger.apply(Event("A2", 2, "AUTHORIZATION", A1, 1000, auth_id="Auth-A"))   # Auth-A exists
+        self.assertTrue(errors(ledger, "A2"))
+        self.assertNotIn("A2", ledger.received)
+        ledger.apply(Event("A2", 2, "AUTHORIZATION", A1, 1000, auth_id="Auth-C"))   # corrected retry
+        self.assertEqual(ledger.auth_state("Auth-C").state, APPROVED)
 
     def test_amount_and_parts_boundaries(self):
         ledger = replay_until("E2")
